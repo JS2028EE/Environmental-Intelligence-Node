@@ -11,6 +11,53 @@ once on the bench — especially the flame path — before relying on it.
 
 ---
 
+## Recent Update — September 6, 2026
+
+**Documentation update only. No firmware source files were changed as part of this update.**
+
+VIGIL-01 V1.2 has now been documented as the current firmware revision in the engineering record. This update records the architectural refactor, reliability improvements, bug fixes, and newly added configuration features already present in the firmware.
+
+### Engineering changes recorded
+
+- Refactored the previous single-file V1.1 firmware into separate modules for configuration, settings, sensors, navigation, alerts, display rendering, web services, and watchdog recovery.
+- Replaced duplicated menu logic with a data-driven menu structure, allowing scrolling, cursor movement, selection, and Back navigation to stay synchronized.
+- Fixed the invisible `FLAME` menu item in Investigate and the invisible/mis-mapped `ABOUT` / `SETTINGS` items in System.
+- Corrected flame detection so the `FLAME_ACTIVE_LOW` configuration constant is actually respected by the sensor logic.
+- Added persistent settings using ESP32 NVS/flash so user preferences survive reboot.
+- Added Celsius/Fahrenheit selection.
+- Added live web-dashboard editing for sound and water alarm thresholds, with persistence.
+- Redesigned the web dashboard with sensor status cards, alarm highlighting, status information, and threshold controls.
+- Added captive-portal behavior and mDNS access through `vigil01.local`.
+- Replaced manual JSON construction with ArduinoJson.
+- Changed the frequently updated `heartSignal` value to a string literal to reduce unnecessary heap churn.
+- Added an optional watchdog recovery system, enabled by default.
+- Added battery-monitoring support behind a configuration flag; it remains disabled until the required voltage-divider hardware is connected.
+
+### Compatibility preserved
+
+The V1.2 refactor intentionally preserves the V1.1 hardware interface and core behavior:
+
+- GPIO assignments remain unchanged.
+- Sensor polarity and tuning remain unchanged.
+- Default sound/water thresholds remain `135 / 2500`.
+- Heart-rate processing and BPM gating remain unchanged.
+- LED and buzzer timing/tones remain unchanged.
+- Button debounce remains 40 ms.
+- Navigation sound effects remain unchanged.
+- Menu hierarchy remains unchanged.
+- Wi-Fi AP credentials remain `VIGIL-01` / `VIGIL01_2026`.
+- Analog sensor inputs remain on ADC1 pins 32–39.
+
+### Validation status
+
+This revision has been reviewed at the firmware/code level but has **not yet been bench-tested on the physical VIGIL-01 hardware**. The flame-detection path and watchdog behavior should receive particular attention during the next hardware validation session.
+
+### Required library change
+
+V1.2 adds **ArduinoJson** as a library dependency. The firmware was written against the ArduinoJson 6.x API. If Arduino Library Manager installs v7 and compilation issues appear, use a compatible 6.21.x release or port the JSON calls to the newer API.
+
+---
+
 ## What stayed exactly the same
 
 - **Every pin.** Buttons, LEDs, buzzer, OLED, and all 12 sensors are on the
