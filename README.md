@@ -80,6 +80,36 @@ The interface is implemented as a state machine with software button debouncing.
 
 The analog inputs are placed on ESP32 ADC1 GPIOs so they remain compatible with Wi-Fi operation.
 
+## Hardware Development Method
+
+VIGIL-01 is currently being developed on a **solderless breadboard**. This is an intentional prototype stage, not the final hardware construction.
+
+The breadboard allows the engineering team to quickly change wiring, replace modules, test individual circuits, characterize sensors, and debug electrical or firmware problems before committing the design to a permanent PCB.
+
+The planned hardware progression is:
+
+```text
+Concept
+  ↓
+Solderless Breadboard Prototype
+  ↓
+Sensor Characterization / Testing
+  ↓
+Schematic Finalization
+  ↓
+PCB Layout
+  ↓
+PCB Fabrication
+  ↓
+Soldered Assembly
+  ↓
+Enclosure / Final Device
+  ↓
+Final Validation
+```
+
+The future PCB will be based on the validated breadboard architecture. Components will be permanently soldered to the fabricated board, replacing the temporary jumper-wire/breadboard construction. Photographs of the prototype, testing, PCB, soldering, and final assembly will be retained as part of the project's engineering record.
+
 ## Breadboard Power During V1 Development
 
 For the current prototype:
@@ -133,6 +163,10 @@ The current V1 firmware is located at:
 
 `firmware/vigil01_v1.ino`
 
+The V1.1 refinement is located at:
+
+`firmware/vigil01_v1_1.ino`
+
 The firmware provides:
 
 - OLED boot and home screens
@@ -140,7 +174,7 @@ The firmware provides:
 - sensor acquisition
 - basic heartbeat signal processing
 - basic system-state interpretation
-- LED/buzzer status outputs
+- configurable LED/buzzer alert presentation
 - local Wi-Fi access point
 - live browser dashboard
 - JSON live-data endpoint
@@ -170,10 +204,13 @@ VIGIL-01 is being developed incrementally:
 4. Heartbeat sensor
 5. LEDs + buzzer
 6. Sensor characterization and calibration
-7. Battery/regulator architecture
-8. Final schematic
-9. PCB/enclosure
-10. Validation and documented revision
+7. Breadboard validation
+8. Battery/regulator architecture
+9. Final schematic
+10. PCB design and fabrication
+11. Soldered assembly
+12. Enclosure
+13. Final validation and documented revision
 
 The design intentionally avoids wiring the entire system at once so that failures can be isolated and measured.
 
@@ -189,11 +226,13 @@ The V1 heartbeat feature is a signal-processing experiment and heart-rate estima
 Environmental-Intelligence-Node/
 ├── README.md
 ├── firmware/
-│   └── vigil01_v1.ino
+│   ├── vigil01_v1.ino
+│   └── vigil01_v1_1.ino
 └── docs/
     ├── HARDWARE.md
     ├── FIRMWARE.md
-    └── DEVELOPMENT_LOG.md
+    ├── DEVELOPMENT_LOG.md
+    └── V1_1_UPDATE.md
 ```
 
 ## Roadmap
@@ -212,9 +251,13 @@ Environmental-Intelligence-Node/
 - [ ] Finalize battery power architecture
 - [ ] Design schematic
 - [ ] Design PCB
+- [ ] Fabricate PCB
+- [ ] Solder permanent hardware assembly
 - [ ] Build enclosure
-- [ ] Perform validation testing
+- [ ] Perform final validation testing
 
 ## Project Philosophy
 
 VIGIL-01 is being built as an engineering project, not just a collection of modules. Every design choice should have a reason, every sensor should be characterized, failures should be documented, and later revisions should be based on measured results.
+
+The breadboard is the **prototype and validation platform**. The planned PCB and soldered assembly are the next hardware revision, not a replacement for the documented prototype history. This distinction is intentional so the project record shows how the design evolved from experimental wiring into permanent hardware.
