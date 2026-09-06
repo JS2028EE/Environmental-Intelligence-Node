@@ -10,7 +10,7 @@
 // Live-only breadboard firmware; USB powered during development.
 // UI layout preserved from V1.0. Adds configurable alert behavior,
 // navigation feedback, and sound-event thresholding.
-// V1.1.2: corrected flame/IR sensor polarity from physical validation.
+// Flame input physically validated: LOW = clear, HIGH = flame/IR event.
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -54,12 +54,18 @@ const int SOUND_ALARM_THRESHOLD=135;
 const int WATER_ALARM_THRESHOLD=2500;
 
 // Digital detection polarity is defined independently for each module.
-// The flame module was physically validated during breadboard testing:
-// CLEAR = HIGH and FLAME/IR DETECTED = LOW.
-// Therefore a LOW reading is the actual flame event.
+// TCRT and IR modules are active-low based on the current prototype wiring.
 const bool TCRT_ACTIVE_LOW=true;
 const bool IR_ACTIVE_LOW=true;
-const bool FLAME_ACTIVE_LOW=true;
+
+// IMPORTANT: This flame module was physically validated by applying a flame.
+// CLEAR = LOW. FLAME/IR EVENT = HIGH.
+const bool FLAME_ACTIVE_LOW=false;
+
+// Require the flame input to remain HIGH briefly before declaring an event.
+// This prevents a short electrical glitch from triggering the alarm.
+const unsigned long FLAME_CONFIRM_MS=100;
+unsigned long flameHighSince=0;
 
 int heartBaseline=2048,heartRate=0;
 bool heartAboveThreshold=false;
@@ -101,14 +107,16 @@ bool pageHasActiveAlert(){
   }
 }
 
-bool alertsAllowedHere(){return automaticAlerts?true:isAlertScreen();}
 bool alertActiveHere(){return automaticAlerts?(systemStatus==STATUS_WARNING||systemStatus==STATUS_CRITICAL):pageHasActiveAlert();}
 
 void setup(){
   Serial.begin(115200);
   pinMode(PIN_UP,INPUT_PULLUP);pinMode(PIN_DOWN,INPUT_PULLUP);pinMode(PIN_SELECT,INPUT_PULLUP);pinMode(PIN_BACK,INPUT_PULLUP);
   pinMode(PIN_GREEN_LED,OUTPUT);pinMode(PIN_RED_LED,OUTPUT);pinMode(PIN_BUZZER,OUTPUT);
-  pinMode(PIN_TCRT,INPUT);pinMode(PIN_IR,INPUT);pinMode(PIN_FLAME,INPUT);
+  pinMode(PIN_TCRT,INPUT);pinMode(PIN_IR,INPUT);
+  // Use a pulldown so the flame input is deterministically LOW when no signal is present.
+  // The sensor's active output drives this pin HIGH when flame/IR is detected.
+  pinMode(PIN_FLAME,INPUT_PULLDOWN);
   digitalWrite(PIN_GREEN_LED,LOW);digitalWrite(PIN_RED_LED,LOW);noTone(PIN_BUZZER);
   Wire.begin(PIN_OLED_SDA,PIN_OLED_SCL);
   if(!display.begin(SSD1306_SWITCHCAPVCC,OLED_ADDRESS)){Serial.println("OLED FAILED");while(true)delay(1000);}
@@ -137,8 +145,16 @@ void readFastSensors(){
   int tcrtRaw=digitalRead(PIN_TCRT);int irRaw=digitalRead(PIN_IR);int flameRaw=digitalRead(PIN_FLAME);
   tcrtDetected=TCRT_ACTIVE_LOW?(tcrtRaw==LOW):(tcrtRaw==HIGH);
   irDetected=IR_ACTIVE_LOW?(irRaw==LOW):(irRaw==HIGH);
-  // Physical validation confirmed this flame module's active state is LOW.
-  flameDetected=FLAME_ACTIVE_LOW?(flameRaw==LOW):(flameRaw==HIGH);
+
+  // Physical validation: flame module is active-HIGH.
+  // Require HIGH continuously for FLAME_CONFIRM_MS before accepting the event.
+  if(flameRaw==HIGH){
+    if(flameHighSince==0)flameHighSince=millis();
+    flameDetected=(millis()-flameHighSince>=FLAME_CONFIRM_MS);
+  }else{
+    flameHighSince=0;
+    flameDetected=false;
+  }
 }
 
 void processHeartRate(){
@@ -250,52 +266,37 @@ void drawCurrentScreen(){
 }
 
 void drawHome(){
-  display.clearDisplay();display.setTextSize(1);display.setCursor(40,0);display.println("VIGIL-01");
-  display.setCursor(8,15);display.print(isnan(temperatureC)?"--":String(temperatureC,1));display.print("C");display.setCursor(73,15);display.print(isnan(humidity)?"--":String(humidity,0));display.println("%");
-  display.setCursor(8,29);display.print(lightRaw);display.setCursor(73,29);display.print(soundRaw);display.setCursor(8,44);display.print(heartRate);display.print(" BPM");display.setCursor(72,44);
-  if(systemStatus==STATUS_NORMAL)display.print("NORMAL");else if(systemStatus==STATUS_WARNING)display.print("WARNING");else if(systemStatus==STATUS_CRITICAL)display.print("CRITICAL");else display.print("NOTICE");
-  display.setCursor(38,56);display.print("[ SELECT ]");
+  display.clearDisplay();display.setTextSize(1);display.setCursor(38,0);display.println("VIGIL-01");
+  display.setTextSize(1);display.setCursor(9,13);display.printf("%4.1f C",temperatureC);display.setCursor(76,13);display.printf("%3.0f %%",humidity);
+  display.setCursor(9,28);display.printf("L:%4d",lightRaw);display.setCursor(76,28);display.printf("S:%4d",soundRaw);
+  display.setCursor(35,43);display.printf("%3d BPM",heartRate);display.setCursor(46,55);display.print(systemStatus==STATUS_CRITICAL?"CRITICAL":systemStatus==STATUS_WARNING?"WARNING":"NORMAL");
 }
-void drawMainMenu(){header("MENU");menuItem(16,"ENVIRONMENT",mainCursor==0);menuItem(27,"VITALS",mainCursor==1);menuItem(38,"INVESTIGATE",mainCursor==2);menuItem(49,"SYSTEM",mainCursor==3);}
-void drawEnvironmentMenu(){header("ENVIRONMENT");menuItem(14,"TEMPERATURE",envCursor==0);menuItem(25,"HUMIDITY",envCursor==1);menuItem(36,"LIGHT",envCursor==2);menuItem(47,"SOUND",envCursor==3);menuItem(58,"CONDITIONS",envCursor==4);}
-void drawVitalsMenu(){header("VITALS");menuItem(18,"HEART",vitalsCursor==0);menuItem(31,"SIGNAL",vitalsCursor==1);menuItem(44,"MEASUREMENT",vitalsCursor==2);}
-void drawInvestigateMenu(){header("INVESTIGATE");menuItem(13,"IR REFLECTION",investigateCursor==0);menuItem(23,"OBJECT",investigateCursor==1);menuItem(33,"MAGNETIC",investigateCursor==2);menuItem(43,"WATER",investigateCursor==3);menuItem(53,"FLAME / IR",investigateCursor==4);}
-void drawSystemMenu(){header("SYSTEM");menuItem(12,"BATTERY",systemCursor==0);menuItem(23,"HARDWARE",systemCursor==1);menuItem(34,"SENSORS",systemCursor==2);menuItem(45,"ABOUT",systemCursor==3);menuItem(56,"SETTINGS",systemCursor==4);}
-void drawSettings(){
-  header("SETTINGS");display.setCursor(0,14);display.print(settingsCursor==0?"> ":"  ");display.print("LEDS: ");display.println(ledsEnabled?"ON":"OFF");
-  display.setCursor(0,29);display.print(settingsCursor==1?"> ":"  ");display.print("BUZZER: ");display.println(buzzerEnabled?"ON":"OFF");
-  display.setCursor(0,44);display.print(settingsCursor==2?"> ":"  ");display.print("ALERTS: ");display.println(automaticAlerts?"GLOBAL":"PAGE");
-  display.setCursor(4,57);display.println("SELECT = TOGGLE");
-}
-void drawValueScreen(const char* title,String value){header(title);display.setTextSize(2);int16_t x1,y1;uint16_t w,h;display.getTextBounds(value,0,0,&x1,&y1,&w,&h);display.setCursor((128-w)/2,28);display.println(value);display.setTextSize(1);display.setCursor(4,56);display.println("BACK = RETURN");}
-void drawHeart(){header("HEART RATE");display.setCursor(4,16);display.println(heartSignal=="WEAK"?"PLACE FINGER":"SIGNAL DETECTED");int baseY=36;for(int x=0;x<118;x+=4){int sample=analogRead(PIN_HEART);int y=baseY-constrain((sample-heartBaseline)/15,-10,10);display.drawPixel(x+5,y,SSD1306_WHITE);}display.setCursor(4,48);display.print(heartRate);display.print(" BPM");display.setCursor(75,48);display.print(heartSignal);}
-void drawMagnetic(){header("MAGNETIC");display.setCursor(4,17);display.print("RAW: ");display.println(hallRaw);display.setCursor(4,31);if(hallRaw>2148)display.println("FIELD: SOUTH");else if(hallRaw<1948)display.println("FIELD: NORTH");else display.println("FIELD: NONE");display.setCursor(4,46);display.println("RELATIVE SIGNAL");display.setCursor(4,57);display.println("BACK = RETURN");}
-void drawConditions(){header("CONDITIONS");display.setCursor(4,17);if(systemStatus==STATUS_NORMAL)display.println("NORMAL");else if(systemStatus==STATUS_WARNING)display.println("ATTENTION");else if(systemStatus==STATUS_CRITICAL)display.println("CRITICAL");else display.println("NOTICE");display.setCursor(4,31);if(flameDetected)display.println("FLAME / IR EVENT");else if(soundRaw>SOUND_ALARM_THRESHOLD)display.println("SOUND EVENT");else if(waterRaw>WATER_ALARM_THRESHOLD)display.println("WATER DETECTED");else if(irDetected)display.println("OBJECT DETECTED");else display.println("NO MAJOR EVENTS");display.setCursor(4,48);display.print("T:");if(!isnan(temperatureC))display.print(temperatureC,1);else display.print("--");display.print("C H:");if(!isnan(humidity))display.print(humidity,0);else display.print("--");display.print("%");}
-void drawHardware(){header("HARDWARE");display.setCursor(4,17);display.println("ESP32");display.setCursor(4,29);display.println("OLED 128x64");display.setCursor(4,41);display.println("VIGIL-01 V1");display.setCursor(4,53);display.println("LIVE MODE");}
-void drawSensorStatus(){header("SENSOR STATUS");display.setCursor(0,14);display.println("DHT11       OK");display.setCursor(0,24);display.println("HEART       OK");display.setCursor(0,34);display.println("LIGHT       OK");display.setCursor(0,44);display.println("SOUND       OK");display.setCursor(0,54);display.println("IR/HALL/WTR OK");}
-void drawAbout(){header("ABOUT");display.setCursor(4,16);display.println("VIGIL-01");display.setCursor(4,28);display.println("Environmental");display.setCursor(4,39);display.println("Intelligence Node");display.setCursor(4,52);display.println("V1 LIVE");}
+void drawMainMenu(){header("MENU");menuItem(16,"ENVIRONMENT",mainCursor==0);menuItem(28,"VITALS",mainCursor==1);menuItem(40,"INVESTIGATE",mainCursor==2);menuItem(52,"SYSTEM",mainCursor==3);}
+void drawEnvironmentMenu(){header("ENVIRONMENT");menuItem(16,"TEMPERATURE",envCursor==0);menuItem(28,"HUMIDITY",envCursor==1);menuItem(40,"LIGHT",envCursor==2);menuItem(52,"SOUND",envCursor==3);}
+void drawVitalsMenu(){header("VITALS");menuItem(16,"HEART",vitalsCursor==0);menuItem(28,"SIGNAL",vitalsCursor==1);menuItem(40,"MEASUREMENT",vitalsCursor==2);}
+void drawInvestigateMenu(){header("INVESTIGATE");menuItem(16,"IR REFLECTION",investigateCursor==0);menuItem(28,"OBJECT",investigateCursor==1);menuItem(40,"MAGNETIC",investigateCursor==2);menuItem(52,"WATER",investigateCursor==3);}
+void drawSystemMenu(){header("SYSTEM");menuItem(16,"BATTERY",systemCursor==0);menuItem(28,"HARDWARE",systemCursor==1);menuItem(40,"SENSOR STATUS",systemCursor==2);menuItem(52,"SETTINGS",systemCursor==4);}
+void drawValueScreen(const char* title,String value){header(title);display.setTextSize(2);display.setCursor(8,27);display.println(value);display.setTextSize(1);display.setCursor(8,52);display.println("BACK to return");}
+void drawConditions(){header("CONDITIONS");display.setCursor(0,16);display.printf("TEMP: %.1f C",temperatureC);display.setCursor(0,28);display.printf("HUM: %.0f %%",humidity);display.setCursor(0,40);display.printf("SOUND: %d",soundRaw);display.setCursor(0,52);display.printf("STATUS: %s",systemStatus==STATUS_CRITICAL?"CRITICAL":systemStatus==STATUS_WARNING?"WARNING":"NORMAL");}
+void drawHeart(){header("HEART RATE");display.setCursor(8,20);display.println("PLACE FINGER");display.setCursor(8,34);display.printf("%d BPM",heartRate);display.setCursor(8,48);display.print("SIGNAL: ");display.println(heartSignal);}
+void drawMagnetic(){header("MAGNETIC");display.setTextSize(2);display.setCursor(8,25);display.println(hallRaw);display.setTextSize(1);}
+void drawHardware(){header("HARDWARE");display.setCursor(0,18);display.println("ESP32 + SSD1306");display.setCursor(0,32);display.println("USB POWERED");display.setCursor(0,46);display.println("V1.1 BREADBOARD");}
+void drawSensorStatus(){header("SENSOR STATUS");display.setCursor(0,16);display.printf("DHT11       OK");display.setCursor(0,28);display.printf("HEART       OK");display.setCursor(0,40);display.printf("LIGHT       OK");display.setCursor(0,52);display.printf("SOUND       OK");}
+void drawAbout(){header("ABOUT");display.setCursor(0,18);display.println("VIGIL-01");display.setCursor(0,30);display.println("ENV INTELLIGENCE NODE");display.setCursor(0,44);display.println("V1.1 LIVE PROTOTYPE");}
+void drawSettings(){header("SETTINGS");display.setCursor(0,16);display.printf("%s LEDS: %s"," ",ledsEnabled?"ON":"OFF");display.setCursor(0,28);display.printf("%s BUZZER: %s"," ",buzzerEnabled?"ON":"OFF");display.setCursor(0,40);display.printf("%s ALERTS: %s"," ",automaticAlerts?"GLOBAL":"PAGE");display.setCursor(0,54);display.print("SELECT changes setting");}
 
 void handleRoot(){
-  String html=R"rawliteral(
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>VIGIL-01</title>
-<style>body{font-family:Arial;background:#111;color:#fff;margin:20px}.card{background:#222;padding:16px;margin:10px 0;border-radius:12px}.value{font-size:28px}.status{font-size:24px;font-weight:bold}</style>
-<script>async function update(){const r=await fetch('/data');const d=await r.json();document.getElementById('temp').innerText=(d.temperature??'--')+' °C';document.getElementById('hum').innerText=(d.humidity??'--')+' %';document.getElementById('light').innerText=d.light;document.getElementById('sound').innerText=d.sound;document.getElementById('heart').innerText=d.heart+' BPM';document.getElementById('hall').innerText=d.hall;document.getElementById('water').innerText=d.water;document.getElementById('status').innerText=d.status}setInterval(update,500);</script></head>
-<body><h1>VIGIL-01</h1><p>Live Environmental Intelligence Node</p>
-<div class="card">Temperature:<div class="value" id="temp">--</div></div><div class="card">Humidity:<div class="value" id="hum">--</div></div>
-<div class="card">Light:<div class="value" id="light">--</div></div><div class="card">Sound:<div class="value" id="sound">--</div></div>
-<div class="card">Heart:<div class="value" id="heart">--</div></div><div class="card">Magnetic:<div class="value" id="hall">--</div></div>
-<div class="card">Water:<div class="value" id="water">--</div></div><div class="card">Status:<div class="status" id="status">--</div></div>
-</body></html>)rawliteral";
+  String html="<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>VIGIL-01</title></head><body><h1>VIGIL-01</h1><p>Live Environmental Intelligence Node</p><pre id='d'>Loading...</pre><script>async function u(){let r=await fetch('/data');let j=await r.json();document.getElementById('d').textContent=JSON.stringify(j,null,2)}setInterval(u,500);u()</script></body></html>";
   server.send(200,"text/html",html);
 }
-
 void handleData(){
-  String status=systemStatus==STATUS_NORMAL?"NORMAL":systemStatus==STATUS_NOTICE?"NOTICE":systemStatus==STATUS_WARNING?"WARNING":"CRITICAL";
   String json="{";
-  json+="\"temperature\":"+String(isnan(temperatureC)?String("null"):String(temperatureC,1));
-  json+=",\"humidity\":"+String(isnan(humidity)?String("null"):String(humidity,0));
-  json+=",\"light\":"+String(lightRaw);json+=",\"sound\":"+String(soundRaw);json+=",\"heart\":"+String(heartRate);json+=",\"hall\":"+String(hallRaw);json+=",\"water\":"+String(waterRaw);
-  json+=",\"tcrt\":"+String(tcrtDetected?"true":"false");json+=",\"object\":"+String(irDetected?"true":"false");json+=",\"flame\":"+String(flameDetected?"true":"false");
-  json+=",\"status\":\""+status+"\"";json+=",\"soundThreshold\":"+String(SOUND_ALARM_THRESHOLD);json+=",\"waterThreshold\":"+String(WATER_ALARM_THRESHOLD);json+=",\"ledsEnabled\":"+String(ledsEnabled?"true":"false");json+=",\"buzzerEnabled\":"+String(buzzerEnabled?"true":"false");json+=",\"automaticAlerts\":"+String(automaticAlerts?"true":"false");json+=",\"activeAlert\":"+String(alertActiveHere()?"true":"false");json+="}";
-  server.send(200,"application/json",json);
+  json+="\"temperatureC\":"+(isnan(temperatureC)?String("null"):String(temperatureC,1));
+  json+=",\"humidity\":"+(isnan(humidity)?String("null"):String(humidity,0));
+  json+=",\"lightRaw\":"+String(lightRaw)+",\"soundRaw\":"+String(soundRaw)+",\"heartRaw\":"+String(heartRaw)+",\"heartRate\":"+String(heartRate)+",\"heartSignal\":\""+heartSignal+"\"";
+  json+=",\"hallRaw\":"+String(hallRaw)+",\"waterRaw\":"+String(waterRaw)+",\"tcrtDetected\":"+(tcrtDetected?"true":"false")+",\"irDetected\":"+(irDetected?"true":"false")+",\"flameDetected\":"+(flameDetected?"true":"false");
+  json+=",\"status\":\""+(systemStatus==STATUS_CRITICAL?String("CRITICAL"):systemStatus==STATUS_WARNING?String("WARNING"):String("NORMAL"))+"\"";
+  json+=",\"soundThreshold\":"+String(SOUND_ALARM_THRESHOLD)+",\"waterThreshold\":"+String(WATER_ALARM_THRESHOLD)+",\"activeAlert\":"+(alertActiveHere()?"true":"false");
+  json+=",\"ledsEnabled\":"+(ledsEnabled?"true":"false")+",\"buzzerEnabled\":"+(buzzerEnabled?"true":"false")+",\"alertsMode\":\""+(automaticAlerts?String("GLOBAL"):String("PAGE"))+"\"";
+  json+="}";server.send(200,"application/json",json);
 }
