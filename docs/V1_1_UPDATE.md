@@ -2,7 +2,31 @@
 
 Date: 2026-09-05
 
-V1.1 is a targeted refinement of the working VIGIL-01 V1 breadboard firmware. The sensing architecture and OLED presentation are preserved; the update improves alert control and physical-interface feedback. VIGIL-01 remains live-only: no SD card, historical database, cloud storage, or persistent telemetry was added.
+V1.1 is a targeted refinement of the working VIGIL-01 V1 **breadboard prototype** firmware. The sensing architecture and OLED presentation are preserved; the update improves alert control and physical-interface feedback. VIGIL-01 remains live-only: no SD card, historical database, cloud storage, or persistent telemetry was added.
+
+## Prototype Hardware Status
+
+V1.1 is being developed and validated on the same **solderless breadboard prototype** documented in `docs/HARDWARE.md`. The firmware is being tested against temporary jumper-wire connections before the hardware is committed to a permanent PCB.
+
+The breadboard stage allows firmware, sensor thresholds, GPIO assignments, alert behavior, and electrical connections to be changed and validated without permanently soldering the design. Once the prototype has passed sufficient characterization and validation, the validated circuit will move to a custom PCB and the components will be soldered into the permanent hardware assembly.
+
+The development path is:
+
+```text
+Breadboard Prototype
+        ↓
+Testing / Characterization
+        ↓
+Validated Schematic
+        ↓
+PCB Design + Fabrication
+        ↓
+Soldered Assembly
+        ↓
+Enclosure + Final Validation
+```
+
+Prototype photographs and later PCB/soldering photographs will be retained as part of the engineering record so the hardware evolution is traceable.
 
 ## Changes
 
@@ -76,6 +100,7 @@ No heartbeat-processing change was made. The HW502 continues using the existing 
 ```text
 firmware/vigil01_v1.ino
 firmware/vigil01_v1_1.ino
+docs/HARDWARE.md
 ```
 
 The original V1 file is retained as the baseline for comparison; V1.1 is a separate firmware artifact so the evolution can be documented cleanly.
@@ -93,7 +118,11 @@ The original V1 file is retained as the baseline for comparison; V1.1 is a separ
 - [ ] LEDS OFF disables both LEDs
 - [ ] BUZZER OFF disables navigation/alarm tones
 - [ ] Live `/data` dashboard remains functional
+- [ ] Breadboard prototype remains electrically stable during integrated testing
+- [ ] Validated breadboard behavior is recorded before PCB design begins
 
 ## Engineering rationale
 
 The key design decision is to separate **sensing**, **interpretation**, and **presentation**. VIGIL-01 does not stop monitoring when the user is navigating. Instead, V1.1 lets the user choose whether the interpreted event should be surfaced through the physical alarm outputs globally or only when inspecting sensor pages. This preserves automatic sensing while making the human interface controllable and demonstrable.
+
+The same engineering philosophy applies to the hardware: the breadboard is used as a flexible validation platform, while the future PCB and soldered assembly represent a later, permanent hardware revision based on measured and validated prototype results.
