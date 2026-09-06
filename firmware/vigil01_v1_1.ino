@@ -294,9 +294,9 @@ void handleData(){
   json+="\"temperatureC\":"+(isnan(temperatureC)?String("null"):String(temperatureC,1));
   json+=",\"humidity\":"+(isnan(humidity)?String("null"):String(humidity,0));
   json+=",\"lightRaw\":"+String(lightRaw)+",\"soundRaw\":"+String(soundRaw)+",\"heartRaw\":"+String(heartRaw)+",\"heartRate\":"+String(heartRate)+",\"heartSignal\":\""+heartSignal+"\"";
-  json+=",\"hallRaw\":"+String(hallRaw)+",\"waterRaw\":"+String(waterRaw)+",\"tcrtDetected\":"+(tcrtDetected?"true":"false")+",\"irDetected\":"+(irDetected?"true":"false")+",\"flameDetected\":"+(flameDetected?"true":"false");
+  json+=String(",\"hallRaw\":")+String(hallRaw)+",\"waterRaw\":"+String(waterRaw)+",\"tcrtDetected\":"+(tcrtDetected?"true":"false")+",\"irDetected\":"+(irDetected?"true":"false")+",\"flameDetected\":"+(flameDetected?"true":"false");
   json+=",\"status\":\""+(systemStatus==STATUS_CRITICAL?String("CRITICAL"):systemStatus==STATUS_WARNING?String("WARNING"):String("NORMAL"))+"\"";
-  json+=",\"soundThreshold\":"+String(SOUND_ALARM_THRESHOLD)+",\"waterThreshold\":"+String(WATER_ALARM_THRESHOLD)+",\"activeAlert\":"+(alertActiveHere()?"true":"false");
-  json+=",\"ledsEnabled\":"+(ledsEnabled?"true":"false")+",\"buzzerEnabled\":"+(buzzerEnabled?"true":"false")+",\"alertsMode\":\""+(automaticAlerts?String("GLOBAL"):String("PAGE"))+"\"";
+  json+=String(",\"soundThreshold\":")+String(SOUND_ALARM_THRESHOLD)+",\"waterThreshold\":"+String(WATER_ALARM_THRESHOLD)+",\"activeAlert\":"+(alertActiveHere()?"true":"false");
+  json+=String(",\"ledsEnabled\":")+(ledsEnabled?"true":"false")+",\"buzzerEnabled\":"+(buzzerEnabled?"true":"false")+",\"alertsMode\":\""+(automaticAlerts?String("GLOBAL"):String("PAGE"))+"\"";
   json+="}";server.send(200,"application/json",json);
 }
