@@ -46,19 +46,39 @@ UP, DOWN, SELECT, and BACK now each produce a short audible feedback tone. The e
 
 ### Alert presentation vs. detection
 
-Sensor sampling and status evaluation remain continuous. What changed is the output policy. By default, alerts are page-scoped, so HOME and menu navigation do not continuously flash the red LED or sound the alarm even when a sensor event exists.
+Sensor sampling and overall status evaluation remain continuous. The corrected V1.1 alert logic now separates **overall system status** from **whether the currently displayed page should physically alarm**.
 
-The default is:
+Previously, PAGE mode could still flash the red LED and sound the buzzer while viewing an unrelated sensor because `systemStatus` was being generated from other sensors. For example, an object/IR condition could make the entire system WARNING, which then caused a warning output on a temperature, humidity, heart, light, or other page. This was not the intended PAGE behavior.
+
+The corrected behavior is:
 
 ```text
 ALERTS: PAGE
+  -> Only the currently relevant danger/event condition can activate red LED + alarm.
+
+ALERTS: GLOBAL
+  -> Any defined system danger/event can activate red LED + alarm from any screen.
 ```
 
-In PAGE mode, warning/critical outputs are presented while viewing a sensor or condition screen. GLOBAL mode presents them regardless of the current screen.
+Opening a sensor page by itself is never an alert. A normal value is never an alarm.
+
+### Normal-state LED behavior
+
+When LEDs are enabled and there is no active alert, the **green LED stays solid ON**, including while navigating and while viewing sensor pages. The green LED turns OFF only while a real warning/critical alert is actively being presented, or when `LEDS: OFF` is selected.
+
+The red LED is reserved for active warning/critical conditions. It is OFF during normal operation.
+
+This gives the physical interface a clear state model:
+
+```text
+GREEN SOLID = system normal / no active physical alert
+RED FLASH   = active warning or critical event
+NO LED      = LEDs disabled
+```
 
 ### Output settings
 
-SYSTEM now contains SETTINGS with:
+SYSTEM contains SETTINGS with:
 
 ```text
 SETTINGS
@@ -71,19 +91,34 @@ UP/DOWN selects a setting; SELECT toggles it; BACK returns to SYSTEM.
 
 `LEDS OFF` suppresses both LEDs. `BUZZER OFF` suppresses navigation and alarm tones while sensor detection continues.
 
-The green LED remains solid when LEDs are enabled and no alert is being presented. The red LED is reserved for warning/critical indication.
+### Alert conditions
 
-### Alert priority
+The firmware now defines physical alarm conditions explicitly instead of treating every sensor reading or every sensor page as an alert:
 
 ```text
 FLAME/IR event -> CRITICAL
 WATER > 2500 -> WARNING
 OBJECT detected -> WARNING
 SOUND > 135 -> WARNING
+Other currently implemented sensor pages -> no physical alarm condition by default
 Otherwise -> NORMAL
 ```
 
-Critical has priority over warning. When an alert is permitted by the selected alert mode, WARNING uses rapid red flashing plus warning tones; CRITICAL uses faster red flashing plus critical tones.
+Critical has priority over warning. In PAGE mode, only the condition associated with the displayed sensor/condition page is allowed to activate the physical alert outputs. In GLOBAL mode, the overall system status can activate them from any screen.
+
+The `/data` endpoint also reports `activeAlert` so the dashboard can distinguish an overall interpreted status from whether the physical alert output is currently active on the present screen.
+
+### Digital sensor polarity correction
+
+The previous firmware treated the digital outputs of the IR/flame-related modules as active-high without an explicit polarity conversion. Common versions of these inexpensive comparator modules use **active-low detection outputs**, meaning LOW represents an event and HIGH represents clear. V1.1.1 now makes this polarity explicit in firmware:
+
+```text
+TCRT_ACTIVE_LOW
+IR_ACTIVE_LOW
+FLAME_ACTIVE_LOW
+```
+
+The physical module behavior should still be verified during breadboard characterization because inexpensive module variants can differ. Keeping polarity as a named configuration makes that verification and later PCB revision easier.
 
 ## Sensor-module potentiometers
 
@@ -110,19 +145,27 @@ The original V1 file is retained as the baseline for comparison; V1.1 is a separ
 - [ ] OLED boot and HOME layout remain unchanged
 - [ ] Existing menus navigate correctly
 - [ ] UP/DOWN/SELECT/BACK produce feedback tones
-- [ ] Green LED is solid when enabled
-- [ ] Red LED stays off on HOME/menu screens in PAGE mode
-- [ ] Sound above 135 produces WARNING
-- [ ] Sensor pages can present warnings/critical alerts
-- [ ] GLOBAL mode presents alerts outside sensor pages
+- [ ] Green LED is solid when LEDs are enabled and the system has no active alert
+- [ ] Green LED turns off only during an active physical warning/critical alert
+- [ ] Red LED stays off during normal operation
+- [ ] Red LED stays off on unrelated sensor/menu pages in PAGE mode
+- [ ] Opening a normal sensor page does not trigger the alarm
+- [ ] Sound above 135 produces WARNING when the sound condition is being presented
+- [ ] Water above 2500 produces WARNING when the water condition is being presented
+- [ ] Object detection produces WARNING on the object/conditions page
+- [ ] Flame/IR detection produces CRITICAL on the flame/conditions page
+- [ ] GLOBAL mode presents defined alerts outside the relevant sensor page
 - [ ] LEDS OFF disables both LEDs
 - [ ] BUZZER OFF disables navigation/alarm tones
 - [ ] Live `/data` dashboard remains functional
 - [ ] Breadboard prototype remains electrically stable during integrated testing
+- [ ] Digital sensor polarity is verified against the actual module hardware
 - [ ] Validated breadboard behavior is recorded before PCB design begins
 
 ## Engineering rationale
 
-The key design decision is to separate **sensing**, **interpretation**, and **presentation**. VIGIL-01 does not stop monitoring when the user is navigating. Instead, V1.1 lets the user choose whether the interpreted event should be surfaced through the physical alarm outputs globally or only when inspecting sensor pages. This preserves automatic sensing while making the human interface controllable and demonstrable.
+The key design decision is to separate **sensing**, **interpretation**, and **presentation**. VIGIL-01 does not stop monitoring when the user is navigating. Instead, V1.1 lets the user choose whether the interpreted event should be surfaced through the physical alarm outputs globally or only when inspecting the relevant sensor/condition page.
+
+The corrected implementation goes one step further: a page must have a defined danger condition before it can physically alarm in PAGE mode. This prevents unrelated sensor activity from making every screen appear to be in danger and prevents normal sensor readings from producing warning behavior.
 
 The same engineering philosophy applies to the hardware: the breadboard is used as a flexible validation platform, while the future PCB and soldered assembly represent a later, permanent hardware revision based on measured and validated prototype results.
