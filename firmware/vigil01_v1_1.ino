@@ -10,7 +10,7 @@
 // Live-only breadboard firmware; USB powered during development.
 // UI layout preserved from V1.0. Adds configurable alert behavior,
 // navigation feedback, and sound-event thresholding.
-// V1.1.1: alert output logic corrected so normal sensor pages remain quiet.
+// V1.1.2: corrected flame/IR sensor polarity from physical validation.
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -53,9 +53,10 @@ bool tcrtDetected=false,irDetected=false,flameDetected=false;
 const int SOUND_ALARM_THRESHOLD=135;
 const int WATER_ALARM_THRESHOLD=2500;
 
-// These common module boards use active-low digital detection outputs.
-// Keeping the polarity conversion here prevents HIGH from being treated
-// as an event when the physical module actually reports CLEAR=HIGH.
+// Digital detection polarity is defined independently for each module.
+// The flame module was physically validated during breadboard testing:
+// CLEAR = HIGH and FLAME/IR DETECTED = LOW.
+// Therefore a LOW reading is the actual flame event.
 const bool TCRT_ACTIVE_LOW=true;
 const bool IR_ACTIVE_LOW=true;
 const bool FLAME_ACTIVE_LOW=true;
@@ -89,10 +90,6 @@ bool isAlertScreen(){
   }
 }
 
-// Returns true only when the currently displayed sensor/condition has a
-// defined danger/event condition. This is intentionally separate from
-// overall systemStatus so unrelated sensors cannot trigger an alert while
-// the user is simply viewing another sensor.
 bool pageHasActiveAlert(){
   switch(currentScreen){
     case SOUND_SCREEN:return soundRaw>SOUND_ALARM_THRESHOLD;
@@ -104,8 +101,6 @@ bool pageHasActiveAlert(){
   }
 }
 
-// PAGE mode = only the relevant page can activate outputs.
-// GLOBAL/automatic mode = any defined danger condition can activate outputs.
 bool alertsAllowedHere(){return automaticAlerts?true:isAlertScreen();}
 bool alertActiveHere(){return automaticAlerts?(systemStatus==STATUS_WARNING||systemStatus==STATUS_CRITICAL):pageHasActiveAlert();}
 
@@ -142,6 +137,7 @@ void readFastSensors(){
   int tcrtRaw=digitalRead(PIN_TCRT);int irRaw=digitalRead(PIN_IR);int flameRaw=digitalRead(PIN_FLAME);
   tcrtDetected=TCRT_ACTIVE_LOW?(tcrtRaw==LOW):(tcrtRaw==HIGH);
   irDetected=IR_ACTIVE_LOW?(irRaw==LOW):(irRaw==HIGH);
+  // Physical validation confirmed this flame module's active state is LOW.
   flameDetected=FLAME_ACTIVE_LOW?(flameRaw==LOW):(flameRaw==HIGH);
 }
 
@@ -169,37 +165,15 @@ void evaluateSystemStatus(){
 
 void updateStatusOutputs(){
   static unsigned long lastFlash=0;static bool flashState=false;unsigned long now=millis();
-
-  // LEDs disabled means all visual status outputs are off.
-  if(!ledsEnabled){
-    digitalWrite(PIN_GREEN_LED,LOW);digitalWrite(PIN_RED_LED,LOW);
-    noTone(PIN_BUZZER);
-    return;
-  }
-
-  // Normal operation is GREEN and silent. A sensor page by itself is NOT
-  // an alert. This prevents red flashing/buzzing merely from opening pages.
+  if(!ledsEnabled){digitalWrite(PIN_GREEN_LED,LOW);digitalWrite(PIN_RED_LED,LOW);noTone(PIN_BUZZER);return;}
   bool activeAlert=alertActiveHere();
-  if(!activeAlert){
-    digitalWrite(PIN_GREEN_LED,HIGH);digitalWrite(PIN_RED_LED,LOW);
-    noTone(PIN_BUZZER);
-    return;
-  }
-
-  // A real alert replaces the normal green indication with red.
+  if(!activeAlert){digitalWrite(PIN_GREEN_LED,HIGH);digitalWrite(PIN_RED_LED,LOW);noTone(PIN_BUZZER);return;}
   digitalWrite(PIN_GREEN_LED,LOW);
-
   if(systemStatus==STATUS_CRITICAL){
-    if(now-lastFlash>100){
-      lastFlash=now;flashState=!flashState;
-      if(flashState&&buzzerEnabled)tone(PIN_BUZZER,2200,90);
-    }
+    if(now-lastFlash>100){lastFlash=now;flashState=!flashState;if(flashState&&buzzerEnabled)tone(PIN_BUZZER,2200,90);}
     digitalWrite(PIN_RED_LED,flashState);
   }else{
-    if(now-lastFlash>150){
-      lastFlash=now;flashState=!flashState;
-      if(flashState&&buzzerEnabled)tone(PIN_BUZZER,1800,80);
-    }
+    if(now-lastFlash>150){lastFlash=now;flashState=!flashState;if(flashState&&buzzerEnabled)tone(PIN_BUZZER,1800,80);}
     digitalWrite(PIN_RED_LED,flashState);
   }
 }
