@@ -256,3 +256,60 @@ The next breadboard test is intended to verify:
 ### Engineering significance
 
 This debugging cycle is being retained as part of the project record rather than treating the bug as an implementation detail. The failure exposed an architectural coupling between sensing and presentation; the fix establishes a clearer separation that should scale better when additional sensors, thresholds, and future PCB hardware are introduced.
+
+## 2026-09-05 — Flame Sensor Polarity Reversal Corrected
+
+### Trigger for revision
+
+Physical testing of the VIGIL-01 flame sensor showed that the previously configured interpretation was reversed for the actual module being used. The observed behavior was:
+
+```text
+FLAME PRESENT -> no alarm
+NO FLAME      -> alarm
+```
+
+This occurred when viewing the Flame/IR page and also when using GLOBAL/automatic alert mode.
+
+### Root cause
+
+The firmware's flame input polarity did not match the electrical behavior of the physical module. The module's digital output was being interpreted as though its active state were opposite to the state observed during bench testing.
+
+### Correction
+
+The firmware now explicitly records the validated flame-module behavior:
+
+```text
+CLEAR            = HIGH
+FLAME/IR EVENT   = LOW
+```
+
+Therefore:
+
+```cpp
+const bool FLAME_ACTIVE_LOW=true;
+```
+
+and the sensor read is interpreted as:
+
+```cpp
+flameDetected = FLAME_ACTIVE_LOW ? (flameRaw == LOW) : (flameRaw == HIGH);
+```
+
+This corrected polarity feeds the existing alert pipeline, so the same physical event now drives the correct CRITICAL status in both PAGE and GLOBAL modes.
+
+### Validation plan
+
+The next firmware test must verify both states explicitly:
+
+1. No flame near the sensor → Flame/IR page reports `CLEAR`, green remains on, red remains off, buzzer remains silent.
+2. Flame near the sensor → Flame/IR page reports `DETECTED`, green turns off, red flashes, buzzer activates.
+3. Repeat the same test in GLOBAL mode.
+4. Confirm unrelated sensor pages do not create a flame alarm in PAGE mode.
+
+### Implementation record
+
+Corrected firmware commit:
+
+`0ec981e78d927f1416072993950533142e6682af0`
+
+The correction is intentionally documented as a physical-validation result rather than an assumed module characteristic. The firmware polarity constants remain configurable because module variants can differ.
