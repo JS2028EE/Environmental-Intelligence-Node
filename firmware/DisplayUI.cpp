@@ -1,0 +1,214 @@
+#include "DisplayUI.h"
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "Config.h"
+#include "Types.h"
+#include "Navigation.h"
+#include "Sensors.h"
+#include "Settings.h"
+#include "MenuData.h"
+
+static Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+static uint8_t scrollOffset = 0;
+
+static const uint8_t ROW_Y[] = { 16, 28, 40, 52 };
+static const uint8_t VISIBLE_ROWS = 4;
+
+static void header(const char* title) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println(title);
+  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+}
+
+static void menuRow(uint8_t y, const char* text, bool selected) {
+  display.setCursor(0, y);
+  display.print(selected ? "> " : "  ");
+  display.println(text);
+}
+
+// Generic, scrolling menu renderer. Replaces four near-identical
+// drawXMenu() functions from V1.1 — and, as a side effect of actually
+// supporting scrolling, fixes two display bugs where a menu had more
+// entries than fit on screen (INVESTIGATE's FLAME and SYSTEM's ABOUT were
+// selectable via the button presses but were never actually drawn).
+static void drawMenu(const Menu* m) {
+  header(m->title);
+
+  if (cursor < scrollOffset) scrollOffset = cursor;
+  if (cursor >= scrollOffset + VISIBLE_ROWS) scrollOffset = cursor - VISIBLE_ROWS + 1;
+
+  uint8_t end = (scrollOffset + VISIBLE_ROWS < m->count) ? (scrollOffset + VISIBLE_ROWS) : m->count;
+  for (uint8_t i = scrollOffset; i < end; i++) {
+    menuRow(ROW_Y[i - scrollOffset], m->items[i].label, i == cursor);
+  }
+  if (scrollOffset > 0) { display.setCursor(122, 12); display.write(24); } // up arrow glyph
+  if (end < m->count)   { display.setCursor(122, 56); display.write(25); } // down arrow glyph
+}
+
+static void drawValueScreen(const char* title, const String& value) {
+  header(title);
+  display.setTextSize(2);
+  display.setCursor(8, 27);
+  display.println(value);
+  display.setTextSize(1);
+  display.setCursor(8, 52);
+  display.println("BACK to return");
+}
+
+static float displayTemp(float celsius) {
+  return settings.useFahrenheit ? (celsius * 9.0f / 5.0f + 32.0f) : celsius;
+}
+
+static void drawHome() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(38, 0);
+  display.println("VIGIL-01");
+
+  float t = displayTemp(sensors.temperatureC);
+  display.setCursor(9, 13);  display.printf("%4.1f %c", t, settings.useFahrenheit ? 'F' : 'C');
+  display.setCursor(76, 13); display.printf("%3.0f %%", sensors.humidity);
+  display.setCursor(9, 28);  display.printf("L:%4d", sensors.lightRaw);
+  display.setCursor(76, 28); display.printf("S:%4d", sensors.soundRaw);
+  display.setCursor(35, 43); display.printf("%3d BPM", sensors.heartRate);
+  display.setCursor(46, 55); display.print(toString(systemStatus));
+}
+
+static void drawConditions() {
+  header("CONDITIONS");
+  display.setCursor(0, 16); display.printf("TEMP: %.1f C", sensors.temperatureC);
+  display.setCursor(0, 28); display.printf("HUM: %.0f %%", sensors.humidity);
+  display.setCursor(0, 40); display.printf("SOUND: %d", sensors.soundRaw);
+  display.setCursor(0, 52); display.printf("STATUS: %s", toString(systemStatus));
+}
+
+static void drawHeart() {
+  header("HEART RATE");
+  display.setCursor(8, 20); display.println("PLACE FINGER");
+  display.setCursor(8, 34); display.printf("%d BPM", sensors.heartRate);
+  display.setCursor(8, 48); display.print("SIGNAL: "); display.println(sensors.heartSignal);
+}
+
+static void drawMagnetic() {
+  header("MAGNETIC");
+  display.setTextSize(2);
+  display.setCursor(8, 25);
+  display.println(sensors.hallRaw);
+  display.setTextSize(1);
+}
+
+static void drawHardware() {
+  header("HARDWARE");
+  display.setCursor(0, 18); display.println("ESP32 + SSD1306");
+  display.setCursor(0, 32); display.println("USB POWERED");
+  display.setCursor(0, 46); display.println("V1.2 BREADBOARD");
+}
+
+static void drawSensorStatus() {
+  header("SENSOR STATUS");
+  display.setCursor(0, 16); display.print("DHT11       OK");
+  display.setCursor(0, 28); display.print("HEART       OK");
+  display.setCursor(0, 40); display.print("LIGHT       OK");
+  display.setCursor(0, 52); display.print("SOUND       OK");
+}
+
+static void drawAbout() {
+  header("ABOUT");
+  display.setCursor(0, 18); display.println("VIGIL-01");
+  display.setCursor(0, 30); display.println("ENV INTELLIGENCE NODE");
+  display.setCursor(0, 44); display.println("V1.2 LIVE PROTOTYPE");
+}
+
+static void drawSettings() {
+  header("SETTINGS");
+  const char* labels[SETTINGS_ITEM_COUNT] = {
+    settings.ledsEnabled     ? "LEDS: ON"       : "LEDS: OFF",
+    settings.buzzerEnabled   ? "BUZZER: ON"     : "BUZZER: OFF",
+    settings.automaticAlerts ? "ALERTS: GLOBAL" : "ALERTS: PAGE",
+    settings.useFahrenheit   ? "UNITS: F"       : "UNITS: C",
+  };
+  for (uint8_t i = 0; i < SETTINGS_ITEM_COUNT; i++) {
+    menuRow(ROW_Y[i], labels[i], i == cursor);
+  }
+}
+
+void displayBegin() {
+  Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("OLED FAILED");
+    while (true) delay(1000);
+  }
+  display.setTextColor(SSD1306_WHITE);
+}
+
+void displayShowBoot() {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setCursor(34, 4);  display.println("VIGIL");
+  display.setTextSize(1);
+  display.setCursor(18, 27); display.println("ENVIRONMENTAL");
+  display.setCursor(21, 39); display.println("INTELLIGENCE");
+  display.setCursor(43, 51); display.println("NODE");
+  display.display();
+  delay(1200);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(37, 5);  display.println("VIGIL-01");
+  display.setCursor(28, 20); display.println("SYSTEM READY");
+  display.setTextSize(2);
+  display.setCursor(51, 36); display.println("OK");
+  display.display();
+  if (settings.buzzerEnabled) tone(PIN_BUZZER, 1500, 100);
+  delay(800);
+}
+
+void displayRender() {
+  const Menu* m = getMenu(currentScreen);
+  if (m) { drawMenu(m); display.display(); return; }
+
+  switch (currentScreen) {
+    case HOME: drawHome(); break;
+
+    case TEMP_SCREEN: {
+      float t = displayTemp(sensors.temperatureC);
+      String unit = settings.useFahrenheit ? " F" : " C";
+      drawValueScreen("TEMPERATURE", isnan(t) ? "--" : String(t, 1) + unit);
+      break;
+    }
+    case HUMIDITY_SCREEN:
+      drawValueScreen("HUMIDITY", isnan(sensors.humidity) ? "--" : String(sensors.humidity, 0) + " %");
+      break;
+    case LIGHT_SCREEN: drawValueScreen("LIGHT", String(sensors.lightRaw)); break;
+    case SOUND_SCREEN: drawValueScreen("SOUND", String(sensors.soundRaw)); break;
+    case CONDITIONS_SCREEN: drawConditions(); break;
+
+    case HEART_SCREEN: drawHeart(); break;
+    case SIGNAL_SCREEN: drawValueScreen("HEART SIGNAL", sensors.heartSignal); break;
+    case MEASUREMENT_SCREEN: drawValueScreen("HEART RATE", String(sensors.heartRate) + " BPM"); break;
+
+    case IR_REFLECTION_SCREEN: drawValueScreen("IR REFLECTION", sensors.tcrtDetected ? "DETECTED" : "CLEAR"); break;
+    case OBJECT_SCREEN: drawValueScreen("OBJECT", sensors.irDetected ? "DETECTED" : "CLEAR"); break;
+    case MAGNETIC_SCREEN: drawMagnetic(); break;
+    case WATER_SCREEN: drawValueScreen("WATER", String(sensors.waterRaw)); break;
+    case FLAME_SCREEN: drawValueScreen("FLAME / IR", sensors.flameDetected ? "DETECTED" : "CLEAR"); break;
+
+    case BATTERY_SCREEN:
+#if BATTERY_MONITORING_ENABLED
+      drawValueScreen("BATTERY", String(batteryReadPercent(), 0) + " %");
+#else
+      drawValueScreen("BATTERY", "NOT CONNECTED");
+#endif
+      break;
+    case HARDWARE_SCREEN: drawHardware(); break;
+    case SENSOR_STATUS_SCREEN: drawSensorStatus(); break;
+    case ABOUT_SCREEN: drawAbout(); break;
+    case SETTINGS_SCREEN: drawSettings(); break;
+
+    default: break;
+  }
+  display.display();
+}
