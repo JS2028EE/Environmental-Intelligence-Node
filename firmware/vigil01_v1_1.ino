@@ -10,6 +10,7 @@
 // Live-only breadboard firmware; USB powered during development.
 // UI layout preserved from V1.0. Adds configurable alert behavior,
 // navigation feedback, and sound-event thresholding.
+// V1.1.1: alert output logic corrected so normal sensor pages remain quiet.
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -50,6 +51,14 @@ float temperatureC=NAN,humidity=NAN;
 int lightRaw=0,soundRaw=0,heartRaw=0,hallRaw=0,waterRaw=0;
 bool tcrtDetected=false,irDetected=false,flameDetected=false;
 const int SOUND_ALARM_THRESHOLD=135;
+const int WATER_ALARM_THRESHOLD=2500;
+
+// These common module boards use active-low digital detection outputs.
+// Keeping the polarity conversion here prevents HIGH from being treated
+// as an event when the physical module actually reports CLEAR=HIGH.
+const bool TCRT_ACTIVE_LOW=true;
+const bool IR_ACTIVE_LOW=true;
+const bool FLAME_ACTIVE_LOW=true;
 
 int heartBaseline=2048,heartRate=0;
 bool heartAboveThreshold=false;
@@ -79,7 +88,26 @@ bool isAlertScreen(){
     default:return false;
   }
 }
-bool alertsAllowedHere(){return automaticAlerts||isAlertScreen();}
+
+// Returns true only when the currently displayed sensor/condition has a
+// defined danger/event condition. This is intentionally separate from
+// overall systemStatus so unrelated sensors cannot trigger an alert while
+// the user is simply viewing another sensor.
+bool pageHasActiveAlert(){
+  switch(currentScreen){
+    case SOUND_SCREEN:return soundRaw>SOUND_ALARM_THRESHOLD;
+    case WATER_SCREEN:return waterRaw>WATER_ALARM_THRESHOLD;
+    case OBJECT_SCREEN:return irDetected;
+    case FLAME_SCREEN:return flameDetected;
+    case CONDITIONS_SCREEN:return flameDetected||soundRaw>SOUND_ALARM_THRESHOLD||waterRaw>WATER_ALARM_THRESHOLD||irDetected;
+    default:return false;
+  }
+}
+
+// PAGE mode = only the relevant page can activate outputs.
+// GLOBAL/automatic mode = any defined danger condition can activate outputs.
+bool alertsAllowedHere(){return automaticAlerts?true:isAlertScreen();}
+bool alertActiveHere(){return automaticAlerts?(systemStatus==STATUS_WARNING||systemStatus==STATUS_CRITICAL):pageHasActiveAlert();}
 
 void setup(){
   Serial.begin(115200);
@@ -111,7 +139,10 @@ void showBootScreen(){
 
 void readFastSensors(){
   heartRaw=analogRead(PIN_HEART);lightRaw=analogRead(PIN_LIGHT);soundRaw=analogRead(PIN_SOUND);hallRaw=analogRead(PIN_HALL);waterRaw=analogRead(PIN_WATER);
-  tcrtDetected=digitalRead(PIN_TCRT);irDetected=digitalRead(PIN_IR);flameDetected=digitalRead(PIN_FLAME);
+  int tcrtRaw=digitalRead(PIN_TCRT);int irRaw=digitalRead(PIN_IR);int flameRaw=digitalRead(PIN_FLAME);
+  tcrtDetected=TCRT_ACTIVE_LOW?(tcrtRaw==LOW):(tcrtRaw==HIGH);
+  irDetected=IR_ACTIVE_LOW?(irRaw==LOW):(irRaw==HIGH);
+  flameDetected=FLAME_ACTIVE_LOW?(flameRaw==LOW):(flameRaw==HIGH);
 }
 
 void processHeartRate(){
@@ -129,7 +160,7 @@ void processHeartRate(){
 
 void evaluateSystemStatus(){
   bool warning=false,critical=false;
-  if(waterRaw>2500)warning=true;
+  if(waterRaw>WATER_ALARM_THRESHOLD)warning=true;
   if(irDetected)warning=true;
   if(soundRaw>SOUND_ALARM_THRESHOLD)warning=true;
   if(flameDetected)critical=true;
@@ -138,13 +169,38 @@ void evaluateSystemStatus(){
 
 void updateStatusOutputs(){
   static unsigned long lastFlash=0;static bool flashState=false;unsigned long now=millis();
-  if(!ledsEnabled){digitalWrite(PIN_GREEN_LED,LOW);digitalWrite(PIN_RED_LED,LOW);if(buzzerEnabled)noTone(PIN_BUZZER);return;}
-  digitalWrite(PIN_GREEN_LED,HIGH);
-  if(!alertsAllowedHere()||systemStatus==STATUS_NORMAL||systemStatus==STATUS_NOTICE){digitalWrite(PIN_RED_LED,LOW);if(buzzerEnabled)noTone(PIN_BUZZER);return;}
-  if(systemStatus==STATUS_WARNING){
-    if(now-lastFlash>150){lastFlash=now;flashState=!flashState;if(flashState&&buzzerEnabled)beep(1800,80);}digitalWrite(PIN_RED_LED,flashState);
-  }else if(systemStatus==STATUS_CRITICAL){
-    if(now-lastFlash>100){lastFlash=now;flashState=!flashState;if(flashState&&buzzerEnabled)beep(2200,90);}digitalWrite(PIN_RED_LED,flashState);
+
+  // LEDs disabled means all visual status outputs are off.
+  if(!ledsEnabled){
+    digitalWrite(PIN_GREEN_LED,LOW);digitalWrite(PIN_RED_LED,LOW);
+    noTone(PIN_BUZZER);
+    return;
+  }
+
+  // Normal operation is GREEN and silent. A sensor page by itself is NOT
+  // an alert. This prevents red flashing/buzzing merely from opening pages.
+  bool activeAlert=alertActiveHere();
+  if(!activeAlert){
+    digitalWrite(PIN_GREEN_LED,HIGH);digitalWrite(PIN_RED_LED,LOW);
+    noTone(PIN_BUZZER);
+    return;
+  }
+
+  // A real alert replaces the normal green indication with red.
+  digitalWrite(PIN_GREEN_LED,LOW);
+
+  if(systemStatus==STATUS_CRITICAL){
+    if(now-lastFlash>100){
+      lastFlash=now;flashState=!flashState;
+      if(flashState&&buzzerEnabled)tone(PIN_BUZZER,2200,90);
+    }
+    digitalWrite(PIN_RED_LED,flashState);
+  }else{
+    if(now-lastFlash>150){
+      lastFlash=now;flashState=!flashState;
+      if(flashState&&buzzerEnabled)tone(PIN_BUZZER,1800,80);
+    }
+    digitalWrite(PIN_RED_LED,flashState);
   }
 }
 
@@ -240,7 +296,7 @@ void drawSettings(){
 void drawValueScreen(const char* title,String value){header(title);display.setTextSize(2);int16_t x1,y1;uint16_t w,h;display.getTextBounds(value,0,0,&x1,&y1,&w,&h);display.setCursor((128-w)/2,28);display.println(value);display.setTextSize(1);display.setCursor(4,56);display.println("BACK = RETURN");}
 void drawHeart(){header("HEART RATE");display.setCursor(4,16);display.println(heartSignal=="WEAK"?"PLACE FINGER":"SIGNAL DETECTED");int baseY=36;for(int x=0;x<118;x+=4){int sample=analogRead(PIN_HEART);int y=baseY-constrain((sample-heartBaseline)/15,-10,10);display.drawPixel(x+5,y,SSD1306_WHITE);}display.setCursor(4,48);display.print(heartRate);display.print(" BPM");display.setCursor(75,48);display.print(heartSignal);}
 void drawMagnetic(){header("MAGNETIC");display.setCursor(4,17);display.print("RAW: ");display.println(hallRaw);display.setCursor(4,31);if(hallRaw>2148)display.println("FIELD: SOUTH");else if(hallRaw<1948)display.println("FIELD: NORTH");else display.println("FIELD: NONE");display.setCursor(4,46);display.println("RELATIVE SIGNAL");display.setCursor(4,57);display.println("BACK = RETURN");}
-void drawConditions(){header("CONDITIONS");display.setCursor(4,17);if(systemStatus==STATUS_NORMAL)display.println("NORMAL");else if(systemStatus==STATUS_WARNING)display.println("ATTENTION");else if(systemStatus==STATUS_CRITICAL)display.println("CRITICAL");else display.println("NOTICE");display.setCursor(4,31);if(flameDetected)display.println("FLAME / IR EVENT");else if(soundRaw>SOUND_ALARM_THRESHOLD)display.println("SOUND EVENT");else if(waterRaw>2500)display.println("WATER DETECTED");else if(irDetected)display.println("OBJECT DETECTED");else display.println("NO MAJOR EVENTS");display.setCursor(4,48);display.print("T:");if(!isnan(temperatureC))display.print(temperatureC,1);else display.print("--");display.print("C H:");if(!isnan(humidity))display.print(humidity,0);else display.print("--");display.print("%");}
+void drawConditions(){header("CONDITIONS");display.setCursor(4,17);if(systemStatus==STATUS_NORMAL)display.println("NORMAL");else if(systemStatus==STATUS_WARNING)display.println("ATTENTION");else if(systemStatus==STATUS_CRITICAL)display.println("CRITICAL");else display.println("NOTICE");display.setCursor(4,31);if(flameDetected)display.println("FLAME / IR EVENT");else if(soundRaw>SOUND_ALARM_THRESHOLD)display.println("SOUND EVENT");else if(waterRaw>WATER_ALARM_THRESHOLD)display.println("WATER DETECTED");else if(irDetected)display.println("OBJECT DETECTED");else display.println("NO MAJOR EVENTS");display.setCursor(4,48);display.print("T:");if(!isnan(temperatureC))display.print(temperatureC,1);else display.print("--");display.print("C H:");if(!isnan(humidity))display.print(humidity,0);else display.print("--");display.print("%");}
 void drawHardware(){header("HARDWARE");display.setCursor(4,17);display.println("ESP32");display.setCursor(4,29);display.println("OLED 128x64");display.setCursor(4,41);display.println("VIGIL-01 V1");display.setCursor(4,53);display.println("LIVE MODE");}
 void drawSensorStatus(){header("SENSOR STATUS");display.setCursor(0,14);display.println("DHT11       OK");display.setCursor(0,24);display.println("HEART       OK");display.setCursor(0,34);display.println("LIGHT       OK");display.setCursor(0,44);display.println("SOUND       OK");display.setCursor(0,54);display.println("IR/HALL/WTR OK");}
 void drawAbout(){header("ABOUT");display.setCursor(4,16);display.println("VIGIL-01");display.setCursor(4,28);display.println("Environmental");display.setCursor(4,39);display.println("Intelligence Node");display.setCursor(4,52);display.println("V1 LIVE");}
@@ -266,6 +322,6 @@ void handleData(){
   json+=",\"humidity\":"+String(isnan(humidity)?String("null"):String(humidity,0));
   json+=",\"light\":"+String(lightRaw);json+=",\"sound\":"+String(soundRaw);json+=",\"heart\":"+String(heartRate);json+=",\"hall\":"+String(hallRaw);json+=",\"water\":"+String(waterRaw);
   json+=",\"tcrt\":"+String(tcrtDetected?"true":"false");json+=",\"object\":"+String(irDetected?"true":"false");json+=",\"flame\":"+String(flameDetected?"true":"false");
-  json+=",\"status\":\""+status+"\"";json+=",\"soundThreshold\":"+String(SOUND_ALARM_THRESHOLD);json+=",\"ledsEnabled\":"+String(ledsEnabled?"true":"false");json+=",\"buzzerEnabled\":"+String(buzzerEnabled?"true":"false");json+=",\"automaticAlerts\":"+String(automaticAlerts?"true":"false");json+="}";
+  json+=",\"status\":\""+status+"\"";json+=",\"soundThreshold\":"+String(SOUND_ALARM_THRESHOLD);json+=",\"waterThreshold\":"+String(WATER_ALARM_THRESHOLD);json+=",\"ledsEnabled\":"+String(ledsEnabled?"true":"false");json+=",\"buzzerEnabled\":"+String(buzzerEnabled?"true":"false");json+=",\"automaticAlerts\":"+String(automaticAlerts?"true":"false");json+=",\"activeAlert\":"+String(alertActiveHere()?"true":"false");json+="}";
   server.send(200,"application/json",json);
 }
