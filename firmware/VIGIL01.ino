@@ -1,18 +1,19 @@
 // =============================================================================
 //  VIGIL-01 — Portable Environmental Intelligence Node
-//  Firmware V1.3
+//  Firmware V1.4
 // -----------------------------------------------------------------------------
-//  V1.3 includes the MPU6050 motion/tilt subsystem while preserving the
-//  existing sensor pins, button pins, alarm behavior, and I2C display bus.
-//  The MPU6050 is the GY-521 module and shares the I2C bus with the OLED.
+//  V1.4 includes the MPU-9250/MPU-6500/MPU-9255 motion subsystem, telemetry
+//  state classification, and a staged fall detector while preserving the
+//  existing sensor pins, UI, and environmental alarm behavior.
+//  Motion/tilt/impact are telemetry only. The physical alarm is triggered by
+//  a validated fall sequence (low-g -> impact -> sustained post-impact tilt).
 // =============================================================================
 // Required libraries (Arduino Library Manager):
 //   Adafruit GFX Library
 //   Adafruit SSD1306
 //   DHT sensor library
-//   Adafruit MPU6050
-//   Adafruit Unified Sensor
 //   ArduinoJson 6.x
+// The MPU-9250 family is accessed directly over I2C; no MPU6050 library is used.
 // Everything else used here ships with the ESP32 board package.
 // =============================================================================
 
