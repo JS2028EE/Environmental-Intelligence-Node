@@ -15,6 +15,14 @@ static unsigned long flameHighSince=0,lastBeatTime=0; static int heartBaseline=2
 static uint8_t motionAddress=0;
 static uint8_t motionWhoAmI=0;
 
+// Fall detection state machine. Motion, impact, and tilt remain useful
+// telemetry, but only the validated multi-stage fall event can raise an alarm.
+static unsigned long freeFallSince=0;
+static unsigned long impactCandidateSince=0;
+static unsigned long postImpactSince=0;
+static unsigned long fallTiltSince=0;
+static unsigned long fallAlertUntil=0;
+
 static bool motionWriteByte(uint8_t reg,uint8_t value){
   Wire.beginTransmission(motionAddress);
   Wire.write(reg);
@@ -100,16 +108,72 @@ void sensorsReadFast(){
       sensors.gyroX=gx*GYRO_SCALE; sensors.gyroY=gy*GYRO_SCALE; sensors.gyroZ=gz*GYRO_SCALE;
       sensors.accelMagnitude=sqrtf(sensors.accelX*sensors.accelX+sensors.accelY*sensors.accelY+sensors.accelZ*sensors.accelZ);
       sensors.tiltDegrees=atan2f(sqrtf(sensors.accelX*sensors.accelX+sensors.accelY*sensors.accelY),fabsf(sensors.accelZ))*57.2958f;
-      sensors.motionDetected=fabsf(sensors.accelMagnitude-9.80665f)>MOTION_ACCEL_THRESHOLD_MS2; sensors.impactDetected=sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2; sensors.tiltDetected=sensors.tiltDegrees>TILT_THRESHOLD_DEG;
+
+      // These are telemetry classifiers only. They no longer directly affect
+      // the physical alarm system.
+      sensors.motionDetected=fabsf(sensors.accelMagnitude-9.80665f)>MOTION_ACCEL_THRESHOLD_MS2;
+      sensors.impactDetected=sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2;
+      sensors.tiltDetected=sensors.tiltDegrees>TILT_THRESHOLD_DEG;
+
+      float gyroMagnitude=sqrtf(sensors.gyroX*sensors.gyroX+sensors.gyroY*sensors.gyroY+sensors.gyroZ*sensors.gyroZ);
+      if(sensors.accelMagnitude<0.5f || !isfinite(sensors.accelMagnitude)) sensors.motionState="UNKNOWN";
+      else if(sensors.accelMagnitude<FALL_FREEFALL_THRESHOLD_MS2) sensors.motionState="FREE-FALL";
+      else if(gyroMagnitude>3.5f) sensors.motionState="ROTATING";
+      else if(sensors.accelMagnitude>15.0f) sensors.motionState="FAST/IMPACT";
+      else if(sensors.motionDetected) sensors.motionState="MOVING";
+      else sensors.motionState="STABLE";
+
+      // Multi-stage fall detector:
+      // 1) detect a low-g/free-fall phase,
+      // 2) require a significant impact shortly afterward,
+      // 3) require a sustained post-impact orientation change.
+      // Normal walking/running can create motion and occasional acceleration
+      // spikes, but should not satisfy this complete sequence.
+      unsigned long now=millis();
+      if(sensors.accelMagnitude<FALL_FREEFALL_THRESHOLD_MS2){
+        if(freeFallSince==0)freeFallSince=now;
+      } else if(freeFallSince>0 && now-freeFallSince>FALL_SEQUENCE_TIMEOUT_MS){
+        freeFallSince=0;
+      }
+
+      if(freeFallSince>0 && sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2 && now-freeFallSince<=FALL_SEQUENCE_TIMEOUT_MS){
+        impactCandidateSince=now;
+        postImpactSince=now;
+        freeFallSince=0;
+        fallTiltSince=0;
+      }
+
+      if(impactCandidateSince>0){
+        if(now-impactCandidateSince>FALL_POST_IMPACT_WINDOW_MS){
+          impactCandidateSince=0;
+          postImpactSince=0;
+          fallTiltSince=0;
+        } else if(sensors.tiltDegrees>FALL_POST_IMPACT_TILT_DEG){
+          if(fallTiltSince==0)fallTiltSince=now;
+          if(now-fallTiltSince>=FALL_TILT_CONFIRM_MS){
+            fallAlertUntil=now+FALL_ALERT_HOLD_MS;
+            impactCandidateSince=0;
+            postImpactSince=0;
+            fallTiltSince=0;
+            Serial.println("FALL EVENT: low-g -> impact -> sustained post-impact tilt");
+          }
+        } else {
+          fallTiltSince=0;
+        }
+      }
+
+      sensors.fallDetected=(fallAlertUntil>now);
     } else {
-      sensors.motionDetected=false; sensors.impactDetected=false; sensors.tiltDetected=false;
+      sensors.motionDetected=false; sensors.impactDetected=false; sensors.tiltDetected=false; sensors.fallDetected=false; sensors.motionState="UNKNOWN";
     }
+  } else {
+    sensors.fallDetected=false; sensors.motionState="UNKNOWN";
   }
 }
 
 void sensorsReadSlow(){sensors.temperatureC=dht.readTemperature();sensors.humidity=dht.readHumidity();}
 void heartRateProcess(){static unsigned long lastSample=0;if(millis()-lastSample<10)return;lastSample=millis();heartBaseline=(heartBaseline*99+sensors.heartRaw)/100;int deviation=abs(sensors.heartRaw-heartBaseline);if(deviation<20)sensors.heartSignal="WEAK";else if(deviation<80)sensors.heartSignal="FAIR";else sensors.heartSignal="GOOD";int threshold=heartBaseline+100;if(!heartAboveThreshold&&sensors.heartRaw>threshold){heartAboveThreshold=true;unsigned long now=millis();if(lastBeatTime>0){unsigned long interval=now-lastBeatTime;if(interval>300&&interval<2000){int bpm=60000/interval;if(bpm>=40&&bpm<=200)sensors.heartRate=(sensors.heartRate==0)?bpm:(sensors.heartRate*3+bpm)/4;}}lastBeatTime=now;}if(heartAboveThreshold&&sensors.heartRaw<heartBaseline+50)heartAboveThreshold=false;}
-SystemStatus evaluateSystemStatus(){bool warning=false,critical=false;if(sensors.waterRaw>settings.waterThreshold)warning=true;if(sensors.irDetected)warning=true;if(sensors.soundRaw>settings.soundThreshold)warning=true;if(sensors.motionDetected||sensors.tiltDetected)warning=true;if(sensors.impactDetected)critical=true;if(sensors.flameDetected)critical=true;if(critical)return STATUS_CRITICAL;if(warning)return STATUS_WARNING;return STATUS_NORMAL;}
+SystemStatus evaluateSystemStatus(){bool warning=false,critical=false;if(sensors.waterRaw>settings.waterThreshold)warning=true;if(sensors.irDetected)warning=true;if(sensors.soundRaw>settings.soundThreshold)warning=true;if(sensors.fallDetected)critical=true;if(sensors.flameDetected)critical=true;/* Motion/impact/tilt are telemetry only; they do not alarm. */if(critical)return STATUS_CRITICAL;if(warning)return STATUS_WARNING;return STATUS_NORMAL;}
 #if BATTERY_MONITORING_ENABLED
 float batteryReadPercent(){int raw=analogRead(PIN_BATTERY);float vAdc=(raw/4095.0f)*BATTERY_ADC_REF_V;float vBatt=vAdc*BATTERY_DIVIDER_RATIO;float pct=(vBatt-BATTERY_EMPTY_V)/(BATTERY_FULL_V-BATTERY_EMPTY_V)*100.0f;if(pct<0)pct=0;if(pct>100)pct=100;return pct;}
 #endif
