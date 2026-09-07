@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// V1.2 pins preserved. MPU6050 uses the existing I2C bus shared with the OLED.
+// V1.2 pins preserved. MPU-9250/MPU-6500/MPU-9255 uses the existing I2C bus shared with the OLED.
 #define PIN_BUZZER      4
 #define PIN_GREEN_LED   13
 #define PIN_RED_LED     14
@@ -27,8 +27,10 @@
 #define SCREEN_HEIGHT  64
 #define OLED_RESET     -1
 #define OLED_ADDRESS   0x3C
-#define MPU6050_ADDRESS 0x68
-#define MPU6050_ALT_ADDRESS 0x69
+
+// MPU-9250 family I2C addresses. AD0 LOW = 0x68, AD0 HIGH = 0x69.
+#define MOTION_I2C_ADDRESS     0x68
+#define MOTION_I2C_ALT_ADDRESS 0x69
 
 #define AP_SSID       "VIGIL-01"
 #define AP_PASSWORD   "VIGIL01_2026"
