@@ -2,9 +2,9 @@
 //  VIGIL-01 — Portable Environmental Intelligence Node
 //  Firmware V1.3
 // -----------------------------------------------------------------------------
-//  V1.3 adds a navigation/motion sensing subsystem without changing the
-//  existing sensor pins, button pins, alarm behavior, or I2C display bus.
-//  MPU6050 + BME280 share I2C; a receive-only GPS feed uses GPIO5.
+//  V1.3 includes the MPU6050 motion/tilt subsystem while preserving the
+//  existing sensor pins, button pins, alarm behavior, and I2C display bus.
+//  The MPU6050 is the GY-521 module and shares the I2C bus with the OLED.
 // =============================================================================
 // Required libraries (Arduino Library Manager):
 //   Adafruit GFX Library
@@ -12,8 +12,6 @@
 //   DHT sensor library
 //   Adafruit MPU6050
 //   Adafruit Unified Sensor
-//   Adafruit BME280 Library
-//   TinyGPSPlus
 //   ArduinoJson 6.x
 // Everything else used here ships with the ESP32 board package.
 // =============================================================================
