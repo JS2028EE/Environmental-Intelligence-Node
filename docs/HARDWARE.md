@@ -1,430 +1,248 @@
-# VIGIL-01 Hardware Architecture — V1.3
+# VIGIL-01 Hardware Architecture — V1.4
 
-## 1. System Objective
+## 1. System objective
 
-VIGIL-01 is a portable, handheld sensing instrument centered on an ESP32. The hardware combines environmental sensing, close-range investigation sensors, a pulse sensor, a 6-axis motion sensor, a local user interface, and status outputs.
+VIGIL-01 is a portable ESP32-based environmental and situational sensing instrument. The current prototype combines environmental sensing, close-range investigation sensors, pulse sensing, a 6-axis motion sensor, a local OLED interface, LEDs, a buzzer, and a local Wi-Fi dashboard.
 
-V1.3 is deliberately **live-only**. There is no SD storage, no historical database, and no cloud telemetry.
+V1 remains live-only: no SD storage, historical database, or cloud telemetry is active.
 
-## 2. Hardware Development Stage
+## 2. Prototype stage
 
-VIGIL-01 is currently a **solderless breadboard prototype**. The breadboard is intentionally temporary: it allows sensors, wiring, GPIO assignments, indicators, and other hardware to be changed quickly while the electrical architecture and firmware are being validated.
+VIGIL-01 remains a solderless breadboard prototype. The breadboard is the validation platform before schematic finalization, PCB layout, fabrication, soldered assembly, and enclosure work.
 
-The breadboard stage is used to:
+## 3. GPIO map
 
-- verify that individual modules operate correctly
-- validate the GPIO and power architecture
-- characterize raw analog and digital sensor behavior
-- test the user interface and alert behavior
-- validate the shared I²C bus
-- identify wiring, signal-integrity, power, and firmware problems before committing to permanent hardware
+| GPIO | Function |
+|---:|---|
+| 4 | Passive buzzer |
+| 13 | Green LED through 330 Ω |
+| 14 | Red LED through 330 Ω |
+| 16 | UP button |
+| 17 | DOWN button |
+| 18 | SELECT button |
+| 19 | BACK button |
+| 21 | I²C SDA — OLED + motion sensor |
+| 22 | I²C SCL — OLED + motion sensor |
+| 23 | Flame/IR digital signal |
+| 25 | DHT11 data |
+| 26 | HW511/TCRT5000 signal |
+| 27 | IR obstacle OUT |
+| 32 | HW502 heartbeat analog |
+| 33 | Photoresistor divider |
+| 34 | Sound sensor analog |
+| 35 | 49E Hall A0 |
+| 36 | Water sensor analog |
+| 39 | Reserved battery monitor |
 
-The breadboard prototype is **not the final physical construction** of VIGIL-01. After the electrical design and firmware behavior have been sufficiently validated, the design will be transferred to a custom PCB. The PCB revision will contain the validated circuit in a more compact and permanent form, followed by soldered assembly and, eventually, an enclosure.
+## 4. OLED + MPU-9250-family shared I²C bus
 
-Development progression:
-
-```text
-Concept
-  ↓
-Solderless Breadboard Prototype
-  ↓
-Sensor Characterization / Testing
-  ↓
-Schematic Finalization
-  ↓
-PCB Layout
-  ↓
-PCB Fabrication
-  ↓
-Soldered Assembly
-  ↓
-Enclosure / Final Device
-  ↓
-Validation of Final Revision
-```
-
-## 3. Development Power Architecture
-
-The normal breadboard prototype is powered from a computer USB connection to the ESP32.
+The 0.96-inch SSD1306 OLED and the installed motion module share one I²C bus:
 
 ```text
-USB
- |
-v
-ESP32
- |
- +-- 3V3 rail --> low-voltage sensors + OLED + GY-521
- |
- +-- GND rail --> common ground
+ESP32 GPIO21 SDA
+  ├── OLED SDA
+  └── Motion SDA
+
+ESP32 GPIO22 SCL
+  ├── OLED SCL
+  └── Motion SCL
 ```
 
-A separate bench experiment demonstrated portable-power feasibility using an XTR 502030 3.7 V 200 mAh Li-ion cell through the prototype power-conversion path. This is recorded as a feasibility experiment; it is not yet the final battery architecture.
-
-A resistor must **not** be used as a substitute for a voltage regulator. The ESP32 supply must remain regulated. Battery power will be finalized after selecting a compact regulator/power stage that can handle ESP32 current transients.
-
-## 4. ESP32 GPIO Allocation
-
-| GPIO | Direction / role | Device |
-|---:|---|---|
-| 4 | Output | Passive buzzer |
-| 13 | Output | Green LED through 330 Ω |
-| 14 | Output | Red LED through 330 Ω |
-| 16 | Input pull-up | UP button |
-| 17 | Input pull-up | DOWN button |
-| 18 | Input pull-up | SELECT button |
-| 19 | Input pull-up | BACK button |
-| 21 | I²C SDA | SSD1306 OLED + GY-521 MPU6050 |
-| 22 | I²C SCL | SSD1306 OLED + GY-521 MPU6050 |
-| 23 | Digital input | Flame/IR sensor |
-| 25 | Digital input | DHT11 data |
-| 26 | Digital input | HW511 signal `S` |
-| 27 | Digital input | IR obstacle sensor `OUT` |
-| 32 | ADC1 input | HW502 heartbeat analog output |
-| 33 | ADC1 input | Photoresistor divider |
-| 34 | ADC1 input | Sound sensor analog output |
-| 35 | ADC1 input | 49E linear Hall `A0` |
-| 36 | ADC1 input | Water sensor analog output |
-| 39 | ADC1 input | Reserved battery monitor |
-
-GPIO39 remains unused while battery monitoring is disabled.
-
-## 5. OLED
-
-Display: 0.96-inch SSD1306, 128×64, I²C, four pins.
-
-The module labels its clock pin `SCK`; in this application that pin is the I²C clock (`SCL`).
+Motion-module wiring:
 
 ```text
-OLED VCC  -> ESP32 3V3
-OLED GND  -> ESP32 GND
-OLED SDA  -> GPIO21
-OLED SCK  -> GPIO22
+VCC -> ESP32 3V3
+GND -> ESP32 GND
+SDA -> GPIO21
+SCL -> GPIO22
+AD0 -> GND for 0x68
 ```
 
-## 6. GY-521 / MPU6050
+AD0 HIGH selects `0x69`.
 
-The GY-521 is the V1.3 motion-sensing module. It provides a 3-axis accelerometer and 3-axis gyroscope over I²C.
+### Actual motion hardware clarification
 
-### Wiring
+The module currently used is marked for the **MPU-9250 / MPU-6500 / MPU-9255 family**, rather than being treated as a confirmed MPU6050. The firmware reads `WHO_AM_I` to identify supported silicon:
 
 ```text
-GY-521 VCC -> ESP32 3V3
-GY-521 GND -> ESP32 GND
-GY-521 SDA -> GPIO21
-GY-521 SCL -> GPIO22
-GY-521 INT -> not connected
-GY-521 AD0 -> GND for address 0x68
+0x70 -> MPU-6500
+0x71 -> MPU-9250
+0x73 -> MPU-9255
 ```
 
-If AD0 is HIGH, the MPU6050 uses address `0x69`. The firmware probes both addresses.
+The actual identity is established by the boot diagnostic, not by the generic breakout-board label alone.
 
-The GY-521 does **not** require its own GPIO pair. It shares the same I²C bus as the OLED:
+## 5. Motion capability
 
-```text
-GPIO21 (SDA)
-   ├── OLED SDA
-   └── GY-521 SDA
+The motion module supplies:
 
-GPIO22 (SCL)
-   ├── OLED SCL
-   └── GY-521 SCL
-```
-
-Multiple I²C devices can share the bus because each device is selected by its I²C address. The current firmware uses a conservative 100 kHz I²C clock.
-
-### Firmware configuration
-
-The MPU6050 is configured for:
-
-- ±8 g accelerometer range
-- ±500 °/s gyroscope range
-- 21 Hz digital filter bandwidth
-
-Derived values include:
-
-- acceleration X/Y/Z
-- gyroscope X/Y/Z
+- 3-axis acceleration
+- 3-axis gyroscope
 - acceleration magnitude
 - tilt angle
-- motion detection
-- impact detection
-- tilt detection
+- movement classification
+- impact telemetry
+- fall-event detection
 
-Prototype thresholds:
+The firmware configures ±8 g acceleration and ±500 °/s gyro at 100 kHz I²C.
 
-```text
-Motion = 1.5 m/s² deviation from nominal gravity magnitude
-Impact = 25.0 m/s²
-Tilt   = 30°
-```
+### Alarm behavior
 
-These thresholds are engineering/prototype values and are not safety limits.
+Normal movement is intentionally **not** an alarm. Walking, running, rotation, ordinary tilt, and an isolated acceleration spike are retained as telemetry.
 
-### GY-521 troubleshooting
-
-At boot, V1.3 explicitly initializes the I²C bus before probing the MPU6050 and checks both `0x68` and `0x69`. Serial output at 115200 baud reports the detected address or a failure message.
-
-If the firmware reports that neither address is detected, check the physical bus before changing application logic:
-
-1. GY-521 VCC is connected to the intended supply.
-2. GY-521 GND and ESP32 GND are common.
-3. SDA is on GPIO21 and SCL is on GPIO22.
-4. AD0 is LOW for `0x68` or HIGH for `0x69`.
-5. No loose breadboard jumper is interrupting SDA/SCL.
-6. The GY-521 is not being driven by an unsafe I²C voltage level.
-7. The OLED still works on the same bus; if the OLED works but the MPU does not, verify the MPU address and module wiring.
-
-## 7. User Controls
-
-Four momentary pushbuttons are connected to ground. Firmware enables internal pull-ups.
+Fall detection uses:
 
 ```text
-GPIO16 -> UP     -> GND
-GPIO17 -> DOWN   -> GND
-GPIO18 -> SELECT -> GND
-GPIO19 -> BACK   -> GND
+Low-g/free-fall
+      ↓
+Impact
+      ↓
+Sustained post-impact tilt
+      ↓
+Fall event
 ```
 
-Electrical logic:
+Current prototype parameters are `<4.0 m/s²` low-g, `>25.0 m/s²` impact, `>45°` post-impact tilt, a `1200 ms` sequence window, and `300 ms` tilt confirmation.
 
-```text
-Released = HIGH
-Pressed  = LOW
-```
+This is experimental fall-detection logic and is not a certified safety system.
 
-Software debounce is required.
+### Position/orientation clarification
 
-## 8. DHT11
+The IMU can describe orientation and movement, including tilt and angular rotation. It cannot provide reliable absolute 3D position over long periods by simply integrating acceleration because sensor bias and drift accumulate. V1.4 therefore reports **how the device is oriented and moving**, not a guaranteed geographic/spatial position.
 
-For the three-pin module version:
+## 6. Other sensor wiring
 
-```text
-DHT11 VCC  -> 3V3
-DHT11 GND  -> GND
-DHT11 DATA -> GPIO25
-```
-
-If a bare four-pin DHT11 is used, its pin order and pull-up requirement must be verified before wiring.
-
-## 9. HW502 Heartbeat Sensor
-
-V1 uses the analog pulse signal.
-
-```text
-HW502 VCC -> 3V3
-HW502 GND -> GND
-HW502 AO  -> GPIO32
-```
-
-The module should not be powered at 5 V while its analog output is directly connected to the ESP32 ADC unless the output voltage has been verified safe.
-
-The heartbeat algorithm is an initial experimental estimator. It is not a medical measurement or diagnosis.
-
-## 10. Photoresistor
-
-The photoresistor is used in a voltage divider with a 10 kΩ resistor.
-
-```text
-3V3
- |
-LDR
- |
- +------ GPIO33
- |
-10 kΩ
- |
-GND
-```
-
-The result is a relative light measurement. It is not automatically a calibrated lux measurement.
-
-## 11. Sound Sensor
-
-For a module exposing VCC, GND, AO, and DO:
+### DHT11
 
 ```text
 VCC -> 3V3
 GND -> GND
-AO  -> GPIO34
-DO  -> unused
+DATA -> GPIO25
 ```
 
-The analog signal is treated as a relative acoustic signal, not a calibrated SPL/dB measurement. The current prototype software trigger defaults to `soundRaw > 135`.
+### HW502 heartbeat
 
-## 12. HW511 / TCRT5000
+```text
+VCC -> 3V3
+GND -> GND
+AO -> GPIO32
+```
 
-The actual module in the current prototype has three pins: `V+`, `G`, and `S`.
+The result is an experimental pulse/heart-rate estimate, not a medical measurement.
+
+### Photoresistor
+
+Voltage divider with 10 kΩ resistor, divider node to GPIO33.
+
+### Sound sensor
+
+```text
+VCC -> 3V3
+GND -> GND
+AO -> GPIO34
+DO -> unused
+```
+
+The reading is a raw/relative acoustic signal, not calibrated dB SPL.
+
+### HW511/TCRT5000
 
 ```text
 V+ -> 3V3
-G  -> GND
-S  -> GPIO26
+G -> GND
+S -> GPIO26
 ```
 
-`S` is the module's signal output.
-
-## 13. IR Obstacle Sensor
-
-The current module has four pins: `GND`, `VCC`, `OUT`, and `EN`.
-
-Initial wiring:
+### IR obstacle sensor
 
 ```text
 GND -> GND
 VCC -> 3V3
 OUT -> GPIO27
-EN  -> NC (not connected during initial test)
+EN -> NC during initial testing
 ```
 
-The exact enable polarity is not assumed. If the sensor does not operate with EN floating, its module behavior must be characterized before tying EN high or low.
-
-## 14. 49E Linear Hall-Effect Module
-
-The selected Hall module is the analog/linear 49E board. It exposes:
-
-- `GND / G`
-- `+ / VCC`
-- `A0`
-- `D0`
-
-V1 uses the analog output:
+### 49E linear Hall module
 
 ```text
-G   -> GND
-+   -> 3V3
-A0  -> GPIO35
-D0  -> unused
+G -> GND
++ -> 3V3
+A0 -> GPIO35
+D0 -> unused
 ```
 
-The analog output changes with magnetic field strength and direction. It is treated as a relative magnetic signal rather than a calibrated gauss measurement.
-
-## 15. Water Sensor
-
-For the analog-output version:
+### Water sensor
 
 ```text
 VCC -> 3V3
 GND -> GND
-AO  -> GPIO36
+AO -> GPIO36
 ```
 
-The raw ADC value is used as a relative wetness/water signal. Continuous powering may accelerate corrosion on exposed water-sensor electrodes; later revisions may switch sensor power only during measurement.
+The reading is relative wetness/water level. Continuous electrode power may accelerate corrosion.
 
-## 16. Flame / IR Sensor
-
-Initial digital interface:
+### Flame/IR sensor
 
 ```text
 VCC -> 3V3
 GND -> GND
-DO  -> GPIO23
+DO -> GPIO23
 ```
 
-For the current module configuration, firmware uses:
+Current verified firmware polarity:
 
 ```text
-CLEAR          = LOW
-FLAME/IR EVENT = HIGH
+LOW  = CLEAR
+HIGH = FLAME/IR EVENT
 ```
 
-This polarity is intentionally configurable because inexpensive module variants can differ. It should remain validated against the actual hardware.
+## 7. LEDs and buzzer
 
-## 17. Status LEDs
+Green LED: GPIO13 → 330 Ω → LED → GND.
 
-### Green
+Red LED: GPIO14 → 330 Ω → LED → GND.
 
-```text
-GPIO13 -> 330 Ω -> LED anode
-LED cathode -> GND
-```
-
-### Red
-
-```text
-GPIO14 -> 330 Ω -> LED anode
-LED cathode -> GND
-```
-
-## 18. Passive Buzzer
-
-Current breadboard connection:
+Passive buzzer:
 
 ```text
 GPIO4 -> passive buzzer -> GND
 ```
 
-This is acceptable for initial testing if the specific buzzer's current requirement is appropriate for direct GPIO drive. The final design may use a transistor driver if required by the buzzer load.
+A transistor driver may be used in the final design if the selected buzzer requires more current than an ESP32 GPIO should provide.
 
-## 19. Common Ground
+## 8. Common ground and voltage safety
 
-All active modules must share the ESP32 ground reference.
+All active modules share ESP32 ground. ESP32 GPIO/ADC inputs must never receive an unsafe voltage. Any higher-voltage module output must be checked or level-shifted before direct connection.
 
-```text
-ESP32 GND
-   |
-   +-- OLED GND
-   +-- GY-521 GND
-   +-- DHT11 GND
-   +-- heartbeat GND
-   +-- sensor grounds
-   +-- button grounds
-   +-- LED cathodes
-   +-- buzzer ground
-```
+## 9. Current exclusions
 
-## 20. Analog Input Safety
-
-ESP32 ADC pins must not receive voltages above their permitted input range. Any module powered at a higher voltage must have its output checked before direct connection to an ESP32 ADC.
-
-ADC1 is intentionally used for VIGIL-01 analog sensing because Wi-Fi can interfere with ADC2 operation on the classic ESP32.
-
-## 21. Components Used in V1.3 Breadboard
-
-- ESP32 development board
-- 0.96-inch SSD1306 OLED
-- GY-521 / MPU6050
-- DHT11
-- HW502 heartbeat module
-- Photoresistor
-- 10 kΩ resistor
-- Sound sensor
-- HW511 / TCRT5000
-- IR obstacle sensor
-- 49E linear Hall module
-- Water sensor
-- Flame/IR sensor
-- 4 pushbuttons
-- Green LED
-- Red LED
-- 330 Ω resistors ×2
-- Passive buzzer
-- Breadboard and jumper wires
-
-## 22. Components / Features Explicitly Not in V1.3
+Not active in V1.4:
 
 - BME280
-- GPS module/functionality
+- GPS
 - SD card
-- Cloud storage/database
-- RTC/history system
-- Battery monitoring circuitry (GPIO39 remains reserved)
-- Additional unselected kit modules
+- cloud storage/database
+- historical telemetry
+- battery monitoring circuitry
 
-The MPU6050/GY-521 is **not excluded** from V1.3; it is an implemented motion-sensing subsystem on the shared I²C bus.
+GPIO39 remains reserved for future battery monitoring.
 
-## 23. Planned PCB Transition
+## 10. Planned hardware progression
 
-The PCB revision will be created only after the breadboard prototype has been sufficiently tested. The intent is to preserve the validated electrical behavior while improving reliability, compactness, wiring integrity, and physical assembly.
-
-The PCB phase will include:
-
-1. Capture the final validated schematic.
-2. Assign PCB footprints and verify connector/pin orientation.
-3. Route power and signal paths with appropriate grounding and decoupling.
-4. Run electrical/design-rule checks.
-5. Fabricate the board.
-6. Solder components onto the PCB.
-7. Perform bring-up and compare behavior against the breadboard baseline.
-8. Document any PCB-specific failures and revisions.
-
-The breadboard prototype therefore serves as the **engineering validation platform**, while the future PCB serves as the **permanent hardware implementation**.
+```text
+Breadboard validation
+  ↓
+Sensor characterization
+  ↓
+Schematic finalization
+  ↓
+PCB layout + design rules
+  ↓
+PCB fabrication
+  ↓
+Soldered assembly
+  ↓
+Enclosure
+  ↓
+Final validation
+```
