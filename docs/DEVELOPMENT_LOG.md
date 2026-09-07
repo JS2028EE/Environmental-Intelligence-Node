@@ -34,20 +34,15 @@ V1 is live/in-the-moment only:
 - Water sensing
 - Flame/IR investigation
 
-### Removed from V1
+### Removed from original V1
 
-The MPU6050 was intentionally removed. Motion sensing was not considered valuable enough for this version's objective.
+The MPU6050 was intentionally removed in the original V1 architecture. That decision was later reversed during V1.3 development when motion sensing was brought back as a dedicated subsystem on the existing I²C bus.
 
 ### UI architecture
 
 The 0.96-inch 128×64 SSD1306 OLED uses I²C on GPIO21/GPIO22. Four buttons provide UP/DOWN/SELECT/BACK navigation.
 
-Top-level menus:
-
-- Environment
-- Vitals
-- Investigate
-- System
+Top-level menus in the original architecture were Environment, Vitals, Investigate, and System. V1.3 later added Motion.
 
 ### Hardware decisions recorded
 
@@ -70,49 +65,11 @@ Top-level menus:
 - Passive buzzer: GPIO4 to GND
 - GPIO39 reserved for future battery monitoring
 
-### Specific module confirmations
-
-**HW511**
-
-The physical module has `V+`, `G`, and `S` pins.
-
-```text
-V+ -> 3V3
-G  -> GND
-S  -> GPIO26
-```
-
-**IR obstacle sensor**
-
-The physical module has `GND`, `VCC`, `OUT`, and `EN`.
-
-Initial connection:
-
-```text
-GND -> GND
-VCC -> 3V3
-OUT -> GPIO27
-EN  -> not connected during initial test
-```
-
-The EN polarity is not assumed until tested.
-
-**49E linear Hall module**
-
-The selected Hall module exposes `GND`, `+`, `A0`, and `D0`. V1 uses A0 for continuous relative magnetic-field information and leaves D0 unused.
-
-```text
-G   -> GND
-+   -> 3V3
-A0  -> GPIO35
-D0  -> unused
-```
-
 ### Power decision
 
-The current breadboard is powered from the ESP32 USB connection. The battery and charger are postponed until a compact regulated power architecture is selected.
+The current breadboard is powered from the ESP32 USB connection. Battery development was postponed until a compact regulated power architecture could be selected.
 
-A resistor is not being used as a voltage regulator. Resistors remain reserved for functions such as the photoresistor voltage divider and LED current limiting.
+A later bench experiment demonstrated battery-power feasibility using an XTR 502030 3.7 V 200 mAh Li-ion cell through the prototype power-conversion path. This remains a feasibility result rather than the final PCB power architecture.
 
 ### Development methodology
 
@@ -147,7 +104,7 @@ Digital IR/flame-related modules were also being interpreted without an explicit
 
 ### Corrected architecture
 
-V1.1 now separates three stages:
+V1.1 separated:
 
 ```text
 SENSING
@@ -159,157 +116,79 @@ PRESENTATION
 
 Sensors continue being sampled regardless of the current screen. The firmware determines overall status continuously, while the physical LED/buzzer presentation is gated by the selected alert mode.
 
-**PAGE mode:** only the danger condition associated with the currently displayed sensor/condition page can activate the physical alert outputs.
-
-**GLOBAL mode:** any defined system danger/event can activate the physical alert outputs from any screen.
-
-Opening a sensor page is never itself treated as an alert.
-
-### Normal-state output model
-
-When LEDs are enabled and no active alert exists:
-
-```text
-GREEN = solid ON
-RED   = OFF
-BUZZER = silent
-```
-
-During a real warning or critical event:
-
-```text
-GREEN = OFF
-RED   = flashing
-BUZZER = active
-```
-
-If LEDs are disabled, both LEDs remain off. If the buzzer is disabled, both navigation and alarm tones are suppressed while sensor detection continues.
-
-### Defined V1.1 alert conditions
-
-```text
-FLAME/IR event -> CRITICAL
-WATER > 2500   -> WARNING
-OBJECT detected -> WARNING
-SOUND > 135    -> WARNING
-Otherwise      -> NORMAL
-```
-
-These are prototype thresholds based on raw/relative sensor behavior and are not calibrated safety limits.
-
-### Sound characterization
-
-Bench testing showed the sound sensor normally moving around 0–100, while a clap produced a substantially larger response. A prototype trigger of:
-
-```text
-soundRaw > 135
-```
-
-was therefore selected for the current revision. This value is an ADC threshold, not a measurement in dB SPL.
-
-### Navigation feedback
-
-UP, DOWN, SELECT, and BACK now generate short audible feedback tones. The existing software debounce remains in place. The buzzer enable setting controls both navigation feedback and alarm tones.
-
-### Digital polarity configuration
-
-The corrected firmware makes digital detection polarity explicit through configuration constants:
-
-```text
-TCRT_ACTIVE_LOW
-IR_ACTIVE_LOW
-FLAME_ACTIVE_LOW
-```
-
-The actual module behavior must still be verified during breadboard characterization because inexpensive module variants can differ. Keeping polarity configurable prevents a module-specific wiring characteristic from being hidden inside the alert logic.
-
-### Sensor-module trimmer characterization
-
-Onboard potentiometers found on several inexpensive modules are treated as comparator sensitivity/digital switching-threshold adjustments unless proven otherwise. They are not assumed to calibrate the analog physical quantity. Firmware thresholds therefore remain explicitly documented separately from hardware trimmer settings.
-
-### GitHub implementation records
-
-The corrected V1.1 firmware was committed as:
-
-`af3aa0e1547c0d110f905c8215a4339447afe42c`
-
-The V1.1 engineering update documentation was committed as:
-
-`5ee93cfafce40cb516b85de7e87a8667b9579730`
-
-The hardware-stage documentation was also updated to record the current solderless-breadboard stage and the planned transition to a custom PCB and soldered assembly.
-
-### Validation status
-
-The next breadboard test is intended to verify:
-
-- Green LED remains solid during normal operation.
-- Red LED remains off when no relevant alert exists.
-- Buzzer remains silent during normal operation.
-- Entering a normal sensor page does not create an alert.
-- Unrelated sensor activity does not trigger PAGE-mode alarms.
-- Defined warning/critical conditions activate the correct outputs.
-- GLOBAL mode activates defined alerts regardless of the current page.
-- Actual digital sensor polarity matches the configured active-low assumptions.
-- The live dashboard remains functional.
-
-### Engineering significance
-
-This debugging cycle is being retained as part of the project record rather than treating the bug as an implementation detail. The failure exposed an architectural coupling between sensing and presentation; the fix establishes a clearer separation that should scale better when additional sensors, thresholds, and future PCB hardware are introduced.
-
 ## 2026-09-05 — Flame Sensor Polarity Reversal Corrected
 
-### Trigger for revision
-
-Physical testing of the VIGIL-01 flame sensor showed that the previously configured interpretation was reversed for the actual module being used. The observed behavior was:
+Physical testing later showed that the actual flame sensor module used in the prototype had the opposite polarity from the earlier assumption. The current firmware configuration now uses:
 
 ```text
-FLAME PRESENT -> no alarm
-NO FLAME      -> alarm
+FLAME_ACTIVE_LOW = false
+LOW  = CLEAR
+HIGH = FLAME/IR EVENT
 ```
 
-This occurred when viewing the Flame/IR page and also when using GLOBAL/automatic alert mode.
+The older V1.1 active-low statement is retained only as a historical record and is superseded by the current configuration.
 
-### Root cause
+## 2026-09-07 — V1.3 Documentation and GY-521 I²C Debugging
 
-The firmware's flame input polarity did not match the electrical behavior of the physical module. The module's digital output was being interpreted as though its active state were opposite to the state observed during bench testing.
+### Documentation audit
 
-### Correction
+The repository was audited against the active modular V1.3 firmware. The README, hardware architecture, firmware architecture, and V1.1 update record were corrected so they no longer describe the obsolete single-file firmware or claim that the MPU6050 is excluded.
 
-The firmware now explicitly records the validated flame-module behavior:
+Current documentation now records:
+
+- V1.3 modular firmware architecture
+- GY-521 / MPU6050 wiring and shared I²C bus
+- MPU6050 ranges, filtering, derived motion metrics, and thresholds
+- current five-section menu structure including MOTION
+- persistent NVS/flash settings
+- local dashboard, `/data`, settings API, captive portal, and mDNS
+- watchdog operation
+- current flame-sensor polarity
+- BME280/GPS absence from V1.3
+- battery feasibility experiment
+
+### GY-521 failure investigation
+
+The first V1.3 sensor implementation did initialize `Wire` and attempt an MPU6050 probe, but the shared I²C bus was not architecturally owned by one module. `Sensors.cpp` initialized `Wire` for the MPU6050, then `DisplayUI.cpp` initialized `Wire` again when starting the OLED.
+
+That duplicate bus initialization occurred **after** the MPU6050 had already been probed. It is a real firmware design flaw because the OLED and MPU6050 share the same bus and should not independently reinitialize it.
+
+The V1.3 correction makes `Sensors.cpp` the owner of I²C initialization:
 
 ```text
-CLEAR            = HIGH
-FLAME/IR EVENT   = LOW
+Wire.begin(GPIO21, GPIO22)
+Wire.setClock(100000)
 ```
 
-Therefore:
+`DisplayUI.cpp` now attaches the OLED to the already-initialized `Wire` object without calling `Wire.begin()` again.
 
-```cpp
-const bool FLAME_ACTIVE_LOW=true;
+The MPU6050 driver is also called explicitly as:
+
+```text
+mpu.begin(address, &Wire)
 ```
 
-and the sensor read is interpreted as:
+and both `0x68` and `0x69` are tested.
 
-```cpp
-flameDetected = FLAME_ACTIVE_LOW ? (flameRaw == LOW) : (flameRaw == HIGH);
-```
+A 50 ms startup settling delay was added before the probe, and Serial now reports the detected address or a clear failure message at 115200 baud.
 
-This corrected polarity feeds the existing alert pipeline, so the same physical event now drives the correct CRITICAL status in both PAGE and GLOBAL modes.
+### What this proves — and what it does not
 
-### Validation plan
+The duplicate I²C initialization was a genuine firmware bug and has been removed. The previous firmware also lacked sufficient diagnostics to distinguish a software read problem from a physical I²C problem.
 
-The next firmware test must verify both states explicitly:
+However, the repository cannot prove from source code alone that duplicate `Wire.begin()` was the only reason the physical GY-521 produced no data. If the corrected firmware still reports that neither `0x68` nor `0x69` is detected, the remaining fault is almost certainly in the physical I²C path or module configuration and must be checked at the breadboard.
 
-1. No flame near the sensor → Flame/IR page reports `CLEAR`, green remains on, red remains off, buzzer remains silent.
-2. Flame near the sensor → Flame/IR page reports `DETECTED`, green turns off, red flashes, buzzer activates.
-3. Repeat the same test in GLOBAL mode.
-4. Confirm unrelated sensor pages do not create a flame alarm in PAGE mode.
+The new boot diagnostics make that distinction explicit.
 
-### Implementation record
+### Current GY-521 validation procedure
 
-Corrected firmware commit:
+1. Connect GY-521 VCC to the intended supply and GND to ESP32 GND.
+2. Connect SDA to GPIO21 and SCL to GPIO22.
+3. Hold AD0 LOW for address `0x68`, or HIGH for `0x69`.
+4. Open Serial Monitor at 115200 baud.
+5. Confirm the boot message reports `MPU6050/GY-521 detected at 0x68` or `0x69`.
+6. Open the MOTION screen or `/data` endpoint.
+7. With the board stationary, acceleration magnitude should be near gravitational acceleration and should change when the device is rotated or moved.
+8. If neither address is detected, inspect wiring, power, common ground, AD0, I²C voltage levels, breadboard contacts, and the GY-521 itself before changing the sensor algorithm again.
 
-`0ec981e78d927f1416072993950533142e6682af0`
-
-The correction is intentionally documented as a physical-validation result rather than an assumed module characteristic. The firmware polarity constants remain configurable because module variants can differ.
+This debugging cycle is retained as part of the engineering record because it exposed a shared-resource initialization problem and improved the firmware's ability to distinguish software faults from hardware faults.
