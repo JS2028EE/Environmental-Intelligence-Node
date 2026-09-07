@@ -11,6 +11,7 @@ static bool pageHasActiveAlert() {
     case SOUND_SCREEN:      return sensors.soundRaw > settings.soundThreshold;
     case WATER_SCREEN:      return sensors.waterRaw > settings.waterThreshold;
     case OBJECT_SCREEN:     return sensors.irDetected;
+    case IR_REFLECTION_SCREEN: return sensors.tcrtDetected;
     case FLAME_SCREEN:      return sensors.flameDetected;
     case CONDITIONS_SCREEN:
       return sensors.flameDetected
@@ -25,6 +26,10 @@ bool alertActiveHere() {
   // A validated fall is a system-level critical event. It remains physically
   // actionable even in PAGE mode so changing screens cannot suppress a fall.
   if(sensors.fallDetected) return true;
+
+  // GLOBAL mode intentionally uses only the system-wide alarm conditions.
+  // IR reflection is an investigation sensor and is therefore PAGE-scoped only;
+  // sunlight/reflection outdoors must not create a global physical alarm.
   return settings.automaticAlerts
        ? (systemStatus == STATUS_WARNING || systemStatus == STATUS_CRITICAL)
        : pageHasActiveAlert();
