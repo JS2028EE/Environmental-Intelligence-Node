@@ -1,8 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// V1.2 pins preserved. Navigation sensors use the existing I2C bus plus GPIO5
-// as a receive-only GPS UART input.
+// V1.2 pins preserved. MPU6050 uses the existing I2C bus shared with the OLED.
 #define PIN_BUZZER      4
 #define PIN_GREEN_LED   13
 #define PIN_RED_LED     14
@@ -22,8 +21,6 @@
 #define PIN_HALL        35
 #define PIN_WATER       36
 #define PIN_BATTERY     39
-#define PIN_GPS_RX      5
-#define GPS_BAUD        9600
 #define DHTTYPE DHT11
 
 #define SCREEN_WIDTH   128
@@ -32,8 +29,6 @@
 #define OLED_ADDRESS   0x3C
 #define MPU6050_ADDRESS 0x68
 #define MPU6050_ALT_ADDRESS 0x69
-#define BME280_ADDRESS 0x76
-#define BME280_ALT_ADDRESS 0x77
 
 #define AP_SSID       "VIGIL-01"
 #define AP_PASSWORD   "VIGIL01_2026"
@@ -49,12 +44,10 @@ constexpr int DEFAULT_WATER_ALARM_THRESHOLD = 2500;
 constexpr float MOTION_ACCEL_THRESHOLD_MS2 = 1.5f;
 constexpr float IMPACT_ACCEL_THRESHOLD_MS2 = 25.0f;
 constexpr float TILT_THRESHOLD_DEG = 30.0f;
-constexpr float SURFACE_DEADBAND_M = 2.0f;
 
 constexpr unsigned long DEBOUNCE_MS        = 40;
 constexpr unsigned long SENSOR_POLL_MS     = 100;
 constexpr unsigned long DHT_POLL_MS        = 2000;
-constexpr unsigned long GPS_POLL_MS        = 20;
 constexpr unsigned long DISPLAY_REFRESH_MS = 100;
 constexpr uint8_t SETTINGS_ITEM_COUNT = 4;
 
