@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// V1.2 pins preserved. MPU-9250/MPU-6500/MPU-9255 uses the existing I2C bus shared with the OLED.
+// V1.4 pins preserved. MPU-9250/MPU-6500/MPU-9255 uses the existing I2C bus shared with the OLED.
 #define PIN_BUZZER      4
 #define PIN_GREEN_LED   13
 #define PIN_RED_LED     14
@@ -43,9 +43,21 @@ constexpr unsigned long FLAME_CONFIRM_MS = 100;
 constexpr int DEFAULT_SOUND_ALARM_THRESHOLD = 135;
 constexpr int DEFAULT_WATER_ALARM_THRESHOLD = 2500;
 
+// Motion telemetry thresholds. These classify movement but do not directly alarm.
 constexpr float MOTION_ACCEL_THRESHOLD_MS2 = 1.5f;
 constexpr float IMPACT_ACCEL_THRESHOLD_MS2 = 25.0f;
 constexpr float TILT_THRESHOLD_DEG = 30.0f;
+
+// Fall detection is a multi-stage event, not a single high-acceleration trigger.
+// A fall candidate requires low-g acceleration followed by an impact and then
+// a sustained post-impact orientation change. Normal walking/running therefore
+// remains motion telemetry without activating the alarm system.
+constexpr float FALL_FREEFALL_THRESHOLD_MS2 = 4.0f;
+constexpr float FALL_POST_IMPACT_TILT_DEG = 45.0f;
+constexpr unsigned long FALL_SEQUENCE_TIMEOUT_MS = 1200;
+constexpr unsigned long FALL_POST_IMPACT_WINDOW_MS = 1500;
+constexpr unsigned long FALL_TILT_CONFIRM_MS = 300;
+constexpr unsigned long FALL_ALERT_HOLD_MS = 3000;
 
 constexpr unsigned long DEBOUNCE_MS        = 40;
 constexpr unsigned long SENSOR_POLL_MS     = 100;
