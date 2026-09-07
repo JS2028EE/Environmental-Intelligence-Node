@@ -1,38 +1,20 @@
-# VIGIL-01 V1.1 Firmware Update
+# VIGIL-01 V1.1 Firmware Update — Historical Record
 
 Date: 2026-09-05
 
-V1.1 is a targeted refinement of the working VIGIL-01 V1 **breadboard prototype** firmware. The sensing architecture and OLED presentation are preserved; the update improves alert control and physical-interface feedback. VIGIL-01 remains live-only: no SD card, historical database, cloud storage, or persistent telemetry was added.
+> **Status: SUPERSEDED by V1.3.** This document is retained as a historical engineering record. The current firmware architecture, sensor set, GPIO map, alert behavior, and polarity settings are documented in `docs/FIRMWARE.md`, `docs/HARDWARE.md`, and the current `firmware/` source.
+
+V1.1 was a targeted refinement of the working VIGIL-01 V1 **breadboard prototype** firmware. The sensing architecture and OLED presentation were preserved; the update improved alert control and physical-interface feedback. V1.1 remained live-only: no SD card, historical database, cloud storage, or persistent telemetry was added.
 
 ## Prototype Hardware Status
 
-V1.1 is being developed and validated on the same **solderless breadboard prototype** documented in `docs/HARDWARE.md`. The firmware is being tested against temporary jumper-wire connections before the hardware is committed to a permanent PCB.
-
-The breadboard stage allows firmware, sensor thresholds, GPIO assignments, alert behavior, and electrical connections to be changed and validated without permanently soldering the design. Once the prototype has passed sufficient characterization and validation, the validated circuit will move to a custom PCB and the components will be soldered into the permanent hardware assembly.
-
-The development path is:
-
-```text
-Breadboard Prototype
-        ↓
-Testing / Characterization
-        ↓
-Validated Schematic
-        ↓
-PCB Design + Fabrication
-        ↓
-Soldered Assembly
-        ↓
-Enclosure + Final Validation
-```
-
-Prototype photographs and later PCB/soldering photographs will be retained as part of the engineering record so the hardware evolution is traceable.
+V1.1 was developed and validated on the same **solderless breadboard prototype** documented in `docs/HARDWARE.md`. The firmware was tested against temporary jumper-wire connections before the hardware was committed to a permanent PCB.
 
 ## Changes
 
 ### Sound threshold
 
-Bench testing showed the sound sensor normally moving around 0-100 while a clap produced a much larger response. V1.1 therefore uses the explicit prototype trigger:
+Bench testing showed the sound sensor normally moving around 0-100 while a clap produced a much larger response. V1.1 therefore used the explicit prototype trigger:
 
 ```text
 soundRaw > 135 -> STATUS_WARNING
@@ -42,15 +24,11 @@ This is a raw/relative ADC threshold, not calibrated dB SPL.
 
 ### Navigation feedback
 
-UP, DOWN, SELECT, and BACK now each produce a short audible feedback tone. The existing 40 ms software debounce remains in place. The buzzer setting controls both navigation tones and alarm tones.
+UP, DOWN, SELECT, and BACK produced short audible feedback tones. The existing 40 ms software debounce remained in place. The buzzer setting controlled both navigation tones and alarm tones.
 
 ### Alert presentation vs. detection
 
-Sensor sampling and overall status evaluation remain continuous. The corrected V1.1 alert logic now separates **overall system status** from **whether the currently displayed page should physically alarm**.
-
-Previously, PAGE mode could still flash the red LED and sound the buzzer while viewing an unrelated sensor because `systemStatus` was being generated from other sensors. For example, an object/IR condition could make the entire system WARNING, which then caused a warning output on a temperature, humidity, heart, light, or other page. This was not the intended PAGE behavior.
-
-The corrected behavior is:
+V1.1 separated **overall system status** from **whether the currently displayed page should physically alarm**.
 
 ```text
 ALERTS: PAGE
@@ -60,25 +38,15 @@ ALERTS: GLOBAL
   -> Any defined system danger/event can activate red LED + alarm from any screen.
 ```
 
-Opening a sensor page by itself is never an alert. A normal value is never an alarm.
+Opening a sensor page by itself was never an alert. A normal value was never an alarm.
 
 ### Normal-state LED behavior
 
-When LEDs are enabled and there is no active alert, the **green LED stays solid ON**, including while navigating and while viewing sensor pages. The green LED turns OFF only while a real warning/critical alert is actively being presented, or when `LEDS: OFF` is selected.
-
-The red LED is reserved for active warning/critical conditions. It is OFF during normal operation.
-
-This gives the physical interface a clear state model:
-
-```text
-GREEN SOLID = system normal / no active physical alert
-RED FLASH   = active warning or critical event
-NO LED      = LEDs disabled
-```
+When LEDs were enabled and there was no active alert, the green LED stayed solid ON. The red LED was reserved for active warning/critical conditions.
 
 ### Output settings
 
-SYSTEM contains SETTINGS with:
+SYSTEM contained SETTINGS with:
 
 ```text
 SETTINGS
@@ -87,13 +55,9 @@ SETTINGS
   ALERTS: PAGE/GLOBAL
 ```
 
-UP/DOWN selects a setting; SELECT toggles it; BACK returns to SYSTEM.
-
-`LEDS OFF` suppresses both LEDs. `BUZZER OFF` suppresses navigation and alarm tones while sensor detection continues.
-
 ### Alert conditions
 
-The firmware now defines physical alarm conditions explicitly instead of treating every sensor reading or every sensor page as an alert:
+The V1.1 prototype defined:
 
 ```text
 FLAME/IR event -> CRITICAL
@@ -104,13 +68,11 @@ Other currently implemented sensor pages -> no physical alarm condition by defau
 Otherwise -> NORMAL
 ```
 
-Critical has priority over warning. In PAGE mode, only the condition associated with the displayed sensor/condition page is allowed to activate the physical alert outputs. In GLOBAL mode, the overall system status can activate them from any screen.
+Critical had priority over warning.
 
-The `/data` endpoint also reports `activeAlert` so the dashboard can distinguish an overall interpreted status from whether the physical alert output is currently active on the present screen.
+### Digital sensor polarity
 
-### Digital sensor polarity correction
-
-The previous firmware treated the digital outputs of the IR/flame-related modules as active-high without an explicit polarity conversion. Common versions of these inexpensive comparator modules use **active-low detection outputs**, meaning LOW represents an event and HIGH represents clear. V1.1.1 now makes this polarity explicit in firmware:
+V1.1 made digital detection polarity explicit through configuration constants:
 
 ```text
 TCRT_ACTIVE_LOW
@@ -118,54 +80,54 @@ IR_ACTIVE_LOW
 FLAME_ACTIVE_LOW
 ```
 
-The physical module behavior should still be verified during breadboard characterization because inexpensive module variants can differ. Keeping polarity as a named configuration makes that verification and later PCB revision easier.
+The physical module behavior was intended to be verified during breadboard characterization because inexpensive module variants can differ.
 
-## Sensor-module potentiometers
+### Sensor-module potentiometers
 
-Several inexpensive modules contain onboard trimmer potentiometers. These generally adjust comparator sensitivity or a digital switching threshold; they should not be assumed to represent a calibrated change in the physical quantity. V1.1 therefore keeps the software sound threshold explicit at 135 and treats module potentiometer adjustments as hardware characterization variables.
+Onboard potentiometers were treated as comparator sensitivity/digital switching-threshold adjustments unless proven otherwise. They were not assumed to calibrate the physical quantity.
 
-This applies particularly to comparator-equipped sound, Hall, flame/IR, and similar modules.
+### Heartbeat
 
-## Heartbeat
+No heartbeat-processing change was made. The HW502 continued using the experimental baseline/threshold BPM estimator. The result remained an experimental estimate, not a medical measurement.
 
-No heartbeat-processing change was made. The HW502 continues using the existing experimental baseline/threshold BPM estimation because the bench sensor is producing a changing signal. The result remains an experimental estimate, not a medical measurement.
+## Later V1.3 Changes
 
-## Files
+The following changes occurred after this V1.1 record and are intentionally not described as part of the original V1.1 implementation:
 
-```text
-firmware/vigil01_v1.ino
-firmware/vigil01_v1_1.ino
-docs/HARDWARE.md
-```
+- Firmware was reorganized into the current modular V1.3 architecture.
+- MPU6050/GY-521 motion sensing was added on the shared OLED I²C bus.
+- Current GY-521 wiring is SDA GPIO21, SCL GPIO22, with address `0x68` when AD0 is LOW and `0x69` when AD0 is HIGH.
+- BME280 and GPS functionality were removed from the current firmware scope.
+- Persistent NVS/flash settings were added.
+- The local dashboard gained MPU6050 telemetry, settings controls, captive-portal handling, and mDNS.
+- Watchdog support was added.
+- The physical flame-module polarity was later revalidated and changed in the current configuration. **Current V1.3 behavior is `FLAME_ACTIVE_LOW = false`: LOW = clear, HIGH = flame/IR event.** The earlier active-low statement in this historical record must not be used as the current wiring/firmware reference.
 
-The original V1 file is retained as the baseline for comparison; V1.1 is a separate firmware artifact so the evolution can be documented cleanly.
+## Historical Files
 
-## Validation checklist
+The original V1/V1.1 filenames referenced by this document are historical references. The active firmware is now the modular `firmware/VIGIL01.ino` architecture and its supporting `.cpp/.h` files.
 
-- [ ] OLED boot and HOME layout remain unchanged
-- [ ] Existing menus navigate correctly
-- [ ] UP/DOWN/SELECT/BACK produce feedback tones
-- [ ] Green LED is solid when LEDs are enabled and the system has no active alert
-- [ ] Green LED turns off only during an active physical warning/critical alert
-- [ ] Red LED stays off during normal operation
-- [ ] Red LED stays off on unrelated sensor/menu pages in PAGE mode
-- [ ] Opening a normal sensor page does not trigger the alarm
-- [ ] Sound above 135 produces WARNING when the sound condition is being presented
-- [ ] Water above 2500 produces WARNING when the water condition is being presented
-- [ ] Object detection produces WARNING on the object/conditions page
-- [ ] Flame/IR detection produces CRITICAL on the flame/conditions page
-- [ ] GLOBAL mode presents defined alerts outside the relevant sensor page
-- [ ] LEDS OFF disables both LEDs
-- [ ] BUZZER OFF disables navigation/alarm tones
-- [ ] Live `/data` dashboard remains functional
-- [ ] Breadboard prototype remains electrically stable during integrated testing
-- [ ] Digital sensor polarity is verified against the actual module hardware
-- [ ] Validated breadboard behavior is recorded before PCB design begins
+## Historical Validation Checklist
 
-## Engineering rationale
+The V1.1 validation goals included:
 
-The key design decision is to separate **sensing**, **interpretation**, and **presentation**. VIGIL-01 does not stop monitoring when the user is navigating. Instead, V1.1 lets the user choose whether the interpreted event should be surfaced through the physical alarm outputs globally or only when inspecting the relevant sensor/condition page.
+- OLED boot and HOME layout remain unchanged
+- Existing menus navigate correctly
+- UP/DOWN/SELECT/BACK produce feedback tones
+- Green LED is solid when LEDs are enabled and the system has no active alert
+- Red LED stays off during normal operation
+- Red LED stays off on unrelated sensor/menu pages in PAGE mode
+- Opening a normal sensor page does not trigger the alarm
+- Sound above 135 produces WARNING when the sound condition is being presented
+- Water above 2500 produces WARNING when the water condition is being presented
+- Object detection produces WARNING on the object/conditions page
+- Flame/IR detection produces CRITICAL on the flame/conditions page
+- GLOBAL mode presents defined alerts outside the relevant sensor page
+- LEDS OFF disables both LEDs
+- BUZZER OFF disables navigation/alarm tones
+- Live `/data` dashboard remains functional
+- Breadboard prototype remains electrically stable during integrated testing
 
-The corrected implementation goes one step further: a page must have a defined danger condition before it can physically alarm in PAGE mode. This prevents unrelated sensor activity from making every screen appear to be in danger and prevents normal sensor readings from producing warning behavior.
+## Engineering Rationale
 
-The same engineering philosophy applies to the hardware: the breadboard is used as a flexible validation platform, while the future PCB and soldered assembly represent a later, permanent hardware revision based on measured and validated prototype results.
+The key V1.1 design decision was to separate **sensing**, **interpretation**, and **presentation**. The later V1.3 architecture preserves that principle while adding the GY-521 motion subsystem, persistent configuration, improved network services, and watchdog recovery.
