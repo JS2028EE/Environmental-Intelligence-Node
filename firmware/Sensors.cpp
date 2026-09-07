@@ -11,10 +11,28 @@ static unsigned long flameHighSince=0,lastBeatTime=0; static int heartBaseline=2
 
 void sensorsBegin(){
   pinMode(PIN_TCRT,INPUT); pinMode(PIN_IR,INPUT); pinMode(PIN_FLAME,INPUT_PULLDOWN); dht.begin();
+
+  // GY-521 MPU6050 shares the OLED I2C bus on GPIO21/GPIO22.
+  // Initialize the bus explicitly before probing the motion sensor.
   Wire.begin(PIN_OLED_SDA,PIN_OLED_SCL);
-  sensors.mpuPresent=mpu.begin(MPU6050_ADDRESS);
-  if(!sensors.mpuPresent) sensors.mpuPresent=mpu.begin(MPU6050_ALT_ADDRESS);
-  if(sensors.mpuPresent){ mpu.setAccelerometerRange(MPU6050_RANGE_8_G); mpu.setGyroRange(MPU6050_RANGE_500_DEG); mpu.setFilterBandwidth(MPU6050_BAND_21_HZ); }
+  Wire.setClock(100000);
+  delay(50); // allow the GY-521 to settle after power-up
+
+  // The GY-521 normally uses AD0=LOW -> 0x68. If AD0 is HIGH, it uses 0x69.
+  sensors.mpuPresent=mpu.begin(MPU6050_ADDRESS,&Wire);
+  if(sensors.mpuPresent){
+    Serial.println("MPU6050/GY-521 detected at 0x68");
+  } else {
+    sensors.mpuPresent=mpu.begin(MPU6050_ALT_ADDRESS,&Wire);
+    if(sensors.mpuPresent) Serial.println("MPU6050/GY-521 detected at 0x69");
+    else Serial.println("ERROR: MPU6050/GY-521 not detected on I2C bus (0x68/0x69)");
+  }
+
+  if(sensors.mpuPresent){
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  }
 }
 
 void sensorsReadFast(){
