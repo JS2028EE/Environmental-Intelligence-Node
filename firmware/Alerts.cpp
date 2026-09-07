@@ -22,6 +22,9 @@ static bool pageHasActiveAlert() {
 }
 
 bool alertActiveHere() {
+  // A validated fall is a system-level critical event. It remains physically
+  // actionable even in PAGE mode so changing screens cannot suppress a fall.
+  if(sensors.fallDetected) return true;
   return settings.automaticAlerts
        ? (systemStatus == STATUS_WARNING || systemStatus == STATUS_CRITICAL)
        : pageHasActiveAlert();
