@@ -42,7 +42,7 @@ static uint8_t itemCountFor(ScreenState s) {
 }
 static ScreenState parentOf(ScreenState s) {
   if (s == HOME || s == MAIN_MENU) return HOME;
-  static const ScreenState menus[] = { MAIN_MENU, ENV_MENU, VITALS_MENU, INVESTIGATE_MENU, NAVIGATION_MENU, SYSTEM_MENU };
+  static const ScreenState menus[] = { MAIN_MENU, ENV_MENU, VITALS_MENU, INVESTIGATE_MENU, SYSTEM_MENU };
   for (ScreenState menuId : menus) {
     const Menu* m = getMenu(menuId);
     for (uint8_t i = 0; i < m->count; i++) if (m->items[i].target == s) return menuId;
