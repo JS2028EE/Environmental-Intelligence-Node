@@ -8,7 +8,8 @@ struct SensorData {
   bool tcrtDetected=false,irDetected=false,flameDetected=false; int heartRate=0; const char* heartSignal="WAIT";
   bool mpuPresent=false;
   float accelX=NAN,accelY=NAN,accelZ=NAN,gyroX=NAN,gyroY=NAN,gyroZ=NAN,accelMagnitude=NAN,tiltDegrees=NAN;
-  bool motionDetected=false,impactDetected=false,tiltDetected=false;
+  bool motionDetected=false,impactDetected=false,tiltDetected=false,fallDetected=false;
+  const char* motionState="UNKNOWN";
 };
 
 extern SensorData sensors;
