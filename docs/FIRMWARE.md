@@ -1,8 +1,26 @@
-# VIGIL-01 Firmware Architecture — V1
+# VIGIL-01 Firmware Architecture — V1.3
 
 ## Overview
 
-V1 firmware is written for the Arduino ESP32 environment. It is a live embedded instrument: sensors are sampled, interpreted, and displayed without persistent historical storage.
+V1.3 firmware is written for the Arduino ESP32 environment. It is a live embedded instrument: sensors are sampled, interpreted, and displayed without persistent historical event storage.
+
+The firmware uses a modular architecture so sensing, navigation, display rendering, alert presentation, settings, networking, and watchdog servicing can be changed independently.
+
+## Firmware Modules
+
+```text
+VIGIL01.ino       Main coordinator and timing loop
+Config.h          GPIOs, addresses, thresholds, timing, feature flags
+Types.h           Screen and system-state types
+Sensors.cpp/.h    Sensor acquisition and sensor-derived metrics
+Navigation.cpp/.h Button input and screen navigation
+MenuData.h        Menu definitions
+DisplayUI.cpp/.h  OLED rendering
+Alerts.cpp/.h     Physical alert presentation
+Settings.cpp/.h   Persistent NVS/flash settings
+WebDashboard.cpp/.h Local AP, dashboard, JSON API, captive portal, mDNS
+Watchdog.cpp/.h   ESP32 watchdog initialization/feed
+```
 
 ## Required Libraries
 
@@ -11,27 +29,148 @@ Install with Arduino IDE Library Manager:
 - Adafruit GFX Library
 - Adafruit SSD1306
 - DHT sensor library by Adafruit
+- Adafruit MPU6050
 - Adafruit Unified Sensor
+- ArduinoJson 6.x
 
 Provided by the ESP32 Arduino core:
 
 - Wire
 - WiFi
 - WebServer
+- DNSServer
+- ESPmDNS
 
-## Firmware Responsibilities
+BME280 and GPS libraries are **not required by V1.3** because those subsystems are not implemented.
 
-1. Initialize hardware.
-2. Display boot and ready screens.
-3. Sample analog and digital sensors.
-4. Read DHT11 at a slower interval appropriate for the sensor.
-5. Estimate heart rate from the HW502 signal.
-6. Determine an overall live system state.
-7. Drive green/red LEDs and buzzer.
-8. Handle four-button navigation with software debounce.
-9. Render the OLED UI.
-10. Host a local Wi-Fi access point and live dashboard.
-11. Expose live values as JSON.
+## Main Execution Model
+
+The main `.ino` file coordinates the system rather than containing the sensor implementation itself.
+
+```text
+setup()
+  -> Serial
+  -> GPIO outputs
+  -> settingsLoad()
+  -> navigationBegin()
+  -> sensorsBegin()
+  -> displayBegin()
+  -> boot screen
+  -> webBegin()
+  -> watchdogBegin()
+
+loop()
+  -> webPoll()
+  -> navigationPoll()
+  -> fast sensor read / heartbeat / status
+  -> slow DHT read
+  -> OLED refresh
+  -> status outputs
+  -> watchdog feed
+```
+
+The normal loop uses `millis()` scheduling instead of blocking delays. A short 50 ms startup delay is used inside sensor initialization to allow the GY-521 to settle before its I²C probe.
+
+## Timing Model
+
+- Fast sensor processing: approximately every 100 ms
+- DHT11 reading: approximately every 2 s
+- OLED refresh: approximately every 100 ms
+- Web server: serviced continuously
+- Button debounce: approximately 40 ms
+- I²C bus: 100 kHz
+
+## Sensor Architecture
+
+### DHT11
+
+Temperature and humidity are read in the slower sensor task because the DHT11 is not intended for rapid polling.
+
+### Analog Sensors
+
+The firmware samples:
+
+- HW502 heartbeat
+- Photoresistor
+- Sound sensor
+- 49E Hall module
+- Water sensor
+
+These values are raw ADC measurements unless otherwise noted.
+
+### Digital Sensors
+
+The firmware samples:
+
+- HW511/TCRT5000
+- IR obstacle sensor
+- Flame/IR sensor
+
+Detection polarity is configurable in `Config.h` through named constants so module-specific behavior can be validated without burying polarity assumptions in application logic.
+
+### MPU6050 / GY-521
+
+The GY-521 is the V1.3 motion subsystem. It shares the OLED I²C bus on GPIO21/GPIO22.
+
+Initialization now explicitly performs:
+
+1. `Wire.begin(GPIO21, GPIO22)`
+2. 100 kHz I²C clock selection
+3. short power-up settling delay
+4. MPU6050 probe at `0x68`
+5. fallback probe at `0x69`
+6. sensor-range/filter configuration when detected
+
+The firmware uses the explicit `mpu.begin(address, &Wire)` form so the Adafruit MPU6050 driver is guaranteed to use the already-configured ESP32 I²C bus.
+
+At boot, Serial at 115200 baud reports one of:
+
+```text
+MPU6050/GY-521 detected at 0x68
+MPU6050/GY-521 detected at 0x69
+ERROR: MPU6050/GY-521 not detected on I2C bus (0x68/0x69)
+```
+
+The MPU6050 is configured for:
+
+- Accelerometer: ±8 g
+- Gyroscope: ±500 °/s
+- Filter bandwidth: 21 Hz
+
+Each fast read obtains:
+
+- acceleration X/Y/Z
+- gyroscope X/Y/Z
+- acceleration magnitude
+- tilt angle
+
+Derived event flags are:
+
+```text
+Motion: |acceleration magnitude - 9.80665| > 1.5 m/s²
+Impact: acceleration magnitude > 25.0 m/s²
+Tilt:   tilt angle > 30°
+```
+
+These values are prototype detection thresholds, not calibrated safety limits.
+
+## MPU6050 Failure Diagnosis
+
+The previous implementation already called `Wire.begin()` and probed the MPU6050, but it did not explicitly pass the configured `Wire` instance to the driver, did not give the GY-521 time to settle after power-up, and did not provide useful Serial diagnostics when the probe failed.
+
+V1.3 now makes the bus and probe path explicit. This removes ambiguity in the firmware and makes the actual failure mode visible at boot.
+
+If the Serial monitor reports that neither address is detected, the remaining fault is outside the application-level read loop and should be investigated as an electrical/I²C problem:
+
+- VCC/GND wiring
+- common ground
+- SDA/SCL wiring
+- AD0 address state
+- loose breadboard connections
+- I²C voltage level
+- damaged GY-521/module
+
+If the device is detected but values are not changing, the next test is to inspect `/data` and the MOTION screen while physically rotating/moving the module.
 
 ## UI State Machine
 
@@ -59,13 +198,22 @@ HOME
       |    +-- Object
       |    +-- Magnetic
       |    +-- Water
-      |    +-- Flame / IR
+      |    +-- Flame
+      |
+      +-- MOTION
+      |    +-- Acceleration X/Y/Z
+      |    +-- Acceleration magnitude
+      |    +-- Tilt
+      |    +-- Motion state
+      |    +-- Impact state
+      |    +-- Tilt state
       |
       +-- SYSTEM_MENU
            +-- Battery
            +-- Hardware
-           +-- Sensors
+           +-- Sensor Status
            +-- About
+           +-- Settings
 ```
 
 Button behavior:
@@ -75,119 +223,159 @@ Button behavior:
 - SELECT: enter selected item
 - BACK: return to parent screen
 
-## Timing Model
-
-The main loop uses `millis()` instead of blocking delays for normal operation.
-
-- Fast sensor processing: approximately every 100 ms
-- DHT11 reading: approximately every 2 s
-- OLED refresh: approximately every 100 ms
-- Web server: serviced continuously
-- Button debounce: approximately 40 ms
-
 ## Heartbeat Processing
 
-The first V1 implementation uses the HW502 analog output and performs basic baseline tracking and threshold crossing detection.
-
-The algorithm:
+The HW502 analog signal uses a first-pass baseline/threshold BPM estimator:
 
 1. Sample the analog signal.
 2. Slowly track the baseline.
-3. Calculate signal deviation from baseline.
+3. Calculate signal deviation.
 4. Classify signal quality as WEAK, FAIR, or GOOD.
 5. Detect upward threshold crossings.
-6. Measure the interval between crossings.
+6. Measure intervals between crossings.
 7. Convert valid intervals to BPM.
 8. Smooth successive BPM estimates.
 
-This is intentionally a first-pass signal-processing implementation. It should be experimentally characterized before being described as accurate.
+This is an experimental signal-processing feature, not a medical measurement.
 
 ## System Status Logic
 
-Current V1 status logic is deliberately simple:
+Current overall status is evaluated continuously:
 
 ```text
-NO MAJOR EVENT
-    -> NORMAL
-
-WATER ABOVE CURRENT THRESHOLD
-    -> WARNING
-
-OBJECT DETECTED
-    -> WARNING
-
-FLAME/IR EVENT
-    -> CRITICAL
+WATER > configured threshold       -> WARNING
+IR/object detected                 -> WARNING
+SOUND > configured threshold       -> WARNING
+Motion detected                    -> WARNING
+Tilt detected                      -> WARNING
+Impact detected                    -> CRITICAL
+Flame/IR detected                  -> CRITICAL
+Otherwise                          -> NORMAL
 ```
 
-The status model will be refined after sensor characterization. Thresholds should not be treated as universally valid until measured and documented.
+Critical status has priority over warning.
+
+## Alert Presentation
+
+Sensing and overall status are separate from physical presentation.
+
+`ALERTS: PAGE` means only a defined alert condition associated with the currently displayed page can activate the physical outputs.
+
+`ALERTS: GLOBAL` means the overall system status can activate physical outputs from any screen.
+
+The current page-specific physical alert conditions are defined in `Alerts.cpp`:
+
+```text
+SOUND_SCREEN      -> sound threshold exceeded
+WATER_SCREEN      -> water threshold exceeded
+OBJECT_SCREEN     -> object/IR detected
+FLAME_SCREEN      -> flame detected
+CONDITIONS_SCREEN -> any defined condition above
+Other pages       -> no page-specific physical alarm
+```
+
+Motion currently contributes to the overall system status, but it does not have a dedicated page-specific physical alarm condition in PAGE mode. This keeps the MOTION screen informational while preserving motion/impact/tilt visibility and GLOBAL-mode status behavior.
 
 ## Output Behavior
 
-### NORMAL
+When LEDs are enabled and there is no active physical alert:
 
-- Green LED solid
-- Red LED off
-- Buzzer off
+```text
+Green LED = ON
+Red LED   = OFF
+Buzzer    = OFF
+```
 
-### NOTICE
+During an active warning/critical alert:
 
-- Green LED pulses
-- Buzzer off
+```text
+Green LED = OFF
+Red LED   = flashing
+Buzzer    = tone bursts when enabled
+```
 
-### WARNING
+Critical alerts use faster flashing and a higher-frequency tone than warning alerts.
 
-- Red LED flashes slowly
-- Buzzer off in the current prototype
+## Persistent Settings
 
-### CRITICAL
+Settings are stored in ESP32 NVS/flash.
 
-- Red LED flashes rapidly
-- Passive buzzer produces alert tones
+Current persisted settings:
+
+```text
+LEDS: ON/OFF
+BUZZER: ON/OFF
+ALERTS: PAGE/GLOBAL
+UNITS: C/F
+Sound threshold
+Water threshold
+```
+
+Default thresholds:
+
+```text
+Sound = 135
+Water = 2500
+```
+
+Changing a setting does not disable sensor acquisition; it changes configuration or presentation behavior.
 
 ## Wi-Fi Dashboard
 
-V1 creates a local access point:
+V1.3 creates a local access point:
 
 ```text
 SSID: VIGIL-01
 Password: VIGIL01_2026
+mDNS: vigil01.local
 ```
 
-The ESP32 hosts a browser dashboard at its access-point address, normally `192.168.4.1`.
+The browser dashboard provides live values and threshold/settings controls.
 
-The dashboard displays live values only.
-
-Endpoint:
+Endpoints:
 
 ```text
-/data
+GET  /
+GET  /data
+GET  /api/settings
+POST /api/settings
 ```
 
-The endpoint returns JSON containing the current sensor state.
+`/data` includes the current sensor state, MPU6050 presence and measurements, derived motion flags, overall status, thresholds, active-alert state, output settings, alert mode, and units preference.
 
-## No Persistent Storage
+The device also provides a captive-portal DNS redirect and mDNS service.
 
-The V1 firmware does not use:
+## Watchdog
 
-- SD card
-- EEPROM-based event history
-- cloud database
+The watchdog is enabled with an 8-second timeout. The implementation accounts for ESP-IDF API differences across ESP32 Arduino core generations.
+
+The main loop feeds the watchdog during normal execution. If the application becomes stuck and stops servicing the watchdog, the ESP32 can reset.
+
+## Storage Model
+
+V1.3 does not implement historical event storage. It does use NVS/flash for persistent configuration settings.
+
+Not implemented:
+
+- SD event logging
+- historical telemetry database
 - cloud telemetry storage
 - historical graphs
-
-This is intentional. The current objective is reliable live instrumentation.
+- RTC-based event history
 
 ## Known Limitations
 
+- GY-521 detection depends on correct physical I²C wiring and module condition.
 - Heart-rate estimation is experimental.
 - Light is raw/relative ADC data rather than calibrated lux.
 - Sound is raw/relative signal rather than calibrated dB SPL.
 - Hall measurement is relative rather than a calibrated gauss measurement.
 - Water threshold is an initial engineering threshold and requires characterization.
 - Flame/IR detection is not certified fire detection.
-- Sensor presence is currently represented optimistically in the sensor-status screen; robust electrical fault detection is a future improvement.
+- MPU6050 motion/impact/tilt thresholds are prototype rules.
+- Sensor presence detection is not a complete electrical fault-detection system.
 - The IR obstacle module's EN behavior has not been assumed; it is initially left unconnected.
+- Battery monitoring remains disabled.
 
 ## Validation Plan
 
@@ -201,6 +389,18 @@ For each sensor, record:
 - useful operating distance where applicable
 - threshold selection
 - failure modes
+
+For the GY-521 additionally record:
+
+- I²C address observed at boot
+- X/Y/Z acceleration at rest
+- expected gravity magnitude near 9.8 m/s² at rest
+- gyroscope output at rest
+- response to controlled rotation
+- response to controlled translation
+- false motion triggers
+- impact threshold response
+- tilt threshold response
 
 For the heartbeat sensor additionally record:
 
@@ -224,3 +424,4 @@ For the heartbeat sensor additionally record:
 - Better event prioritization
 - Battery voltage and estimated battery state
 - Power-management behavior
+- More formal MPU6050 motion/impact calibration
