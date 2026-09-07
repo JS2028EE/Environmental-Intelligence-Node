@@ -4,7 +4,7 @@ VIGIL-01 is a handheld, ESP32-based environmental and situational sensing instru
 
 > **Project status:** V1.4 solderless-breadboard prototype / live-sensing development
 >
-> **Current power:** USB-powered prototype; battery feasibility has been demonstrated separately
+> **Current power:** USB-powered prototype; battery feasibility demonstrated separately
 >
 > **V1 scope:** Live data only — no SD history, cloud database, or cloud storage
 
@@ -47,7 +47,7 @@ V1.4 includes the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, 
 - HW502 — optical pulse signal / experimental heart-rate estimate
 
 ### Investigate
-- HW511/TCRT5000 — IR reflectivity
+- HW511/TCRT5000 — IR reflection/reflectivity
 - IR obstacle sensor — object detection
 - 49E linear Hall module — relative magnetic response
 - Water sensor — relative wetness/water signal
@@ -63,11 +63,11 @@ V1.4 includes the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, 
 - Impact telemetry
 - Fall-event state
 
-The module shares the OLED I²C bus and consumes no additional GPIO.
+The motion module shares the OLED I²C bus and consumes no additional GPIO.
 
 ## MPU-9250-family identification
 
-The breakout-board marking is not treated as proof of the exact silicon. Firmware reads `WHO_AM_I`:
+Firmware reads `WHO_AM_I` and accepts:
 
 ```text
 0x70 -> MPU-6500
@@ -83,7 +83,7 @@ V1.4 separates **movement telemetry** from **physical alarms**.
 
 Walking, running, rotating, ordinary tilt, and an isolated acceleration spike do **not** trigger the buzzer/red alarm.
 
-A fall requires a multi-stage sequence:
+A fall requires:
 
 ```text
 LOW-G / FREE-FALL
@@ -106,23 +106,45 @@ Tilt confirmation:  300 ms
 Alert hold:         3000 ms
 ```
 
-These are experimental heuristics and must be characterized with safe, controlled testing.
+## Alarm routing
 
-### Orientation vs. position
+VIGIL-01 separates sensor detection from alarm policy.
 
-The IMU can report orientation and movement, but it cannot maintain reliable absolute 3D position indefinitely from acceleration/gyro integration alone because drift accumulates. V1.4 therefore tells the user **how the device is moving and oriented**, rather than claiming a precise absolute position.
+### PAGE mode
 
-## Alarm conditions
+Only the alarm condition belonging to the currently selected page can activate the physical alarm:
 
 ```text
-Water above configured threshold -> WARNING
-Object/IR detected               -> WARNING
-Sound above configured threshold -> WARNING
-Fall event                       -> CRITICAL
-Flame/IR event                   -> CRITICAL
+SOUND page          -> sound threshold
+WATER page          -> water threshold
+OBJECT page         -> IR obstacle detection
+FLAME page          -> flame/IR event
+IR REFLECTION page  -> TCRT5000 detection
 ```
 
-Motion, tilt, impact telemetry, and gyro rotation are not direct alarm conditions.
+An unrelated sensor condition must not activate the alarm on another page.
+
+### GLOBAL mode
+
+Defined system-wide conditions activate the physical alarm:
+
+```text
+Water threshold exceeded -> WARNING
+Object/IR detected       -> WARNING
+Sound threshold exceeded -> WARNING
+Fall event               -> CRITICAL
+Flame/IR event           -> CRITICAL
+```
+
+The **TCRT5000 IR reflection sensor is intentionally excluded from GLOBAL mode**. Outdoor testing showed that sunlight/ambient infrared can make the reflection sensor report detection, producing nuisance alarms. It remains fully available on its investigation page.
+
+A validated fall remains system-level and can activate the physical alarm regardless of the selected page.
+
+See `docs/OUTDOOR_IR_REFLECTION_FIX.md` for the incident, root cause, correction, and validation matrix.
+
+## Orientation vs. position
+
+The IMU can report orientation and movement, but it cannot maintain reliable absolute 3D position indefinitely from acceleration/gyro integration alone because drift accumulates. V1.4 therefore reports how the device is moving and oriented rather than claiming a precise absolute position.
 
 ## User interface
 
@@ -232,7 +254,7 @@ BME280, GPS, SD storage, cloud telemetry, historical databases, and battery moni
 
 ## Engineering record
 
-The development log records the MPU detection/debugging cycle, the shared-I²C initialization correction, the replacement of the obsolete MPU6050-specific implementation, and the V1.4 change that prevents normal movement from activating the alarm.
+The development record includes the MPU identification/debugging cycle, shared-I²C correction, motion false-alarm redesign, and the outdoor IR-reflection incident that led to PAGE-only TCRT5000 alarm routing.
 
 ## Roadmap
 
@@ -246,8 +268,11 @@ The development log records the MPU detection/debugging cycle, the shared-I²C i
 - [x] Add local dashboard and persistent settings
 - [x] Add watchdog support
 - [x] Document breadboard and battery feasibility work
+- [x] Diagnose outdoor TCRT5000 reflection nuisance alarm
+- [x] Implement PAGE-only TCRT5000 alarm routing
 - [ ] Characterize all sensor outputs
 - [ ] Validate fall detector with controlled tests
+- [ ] Validate PAGE/GLOBAL alarm matrix
 - [ ] Improve sensor fault detection
 - [ ] Finalize battery architecture
 - [ ] Design schematic
