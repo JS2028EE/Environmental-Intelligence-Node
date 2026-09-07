@@ -2,36 +2,76 @@
 #include "Settings.h"
 #include <Wire.h>
 #include <DHT.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
+#include <math.h>
 
-static DHT dht(PIN_DHT,DHTTYPE); static Adafruit_MPU6050 mpu;
+static DHT dht(PIN_DHT,DHTTYPE);
 SensorData sensors; SystemStatus systemStatus=STATUS_NORMAL;
 static unsigned long flameHighSince=0,lastBeatTime=0; static int heartBaseline=2048; static bool heartAboveThreshold=false;
+
+// MPU-9250 / MPU-6500 / MPU-9255 register interface.
+// The accelerometer and gyroscope portion of these devices uses the same
+// register map for the measurements needed by VIGIL-01, so no MPU6050 library
+// is required.
+static uint8_t motionAddress=0;
+static uint8_t motionWhoAmI=0;
+
+static bool motionWriteByte(uint8_t reg,uint8_t value){
+  Wire.beginTransmission(motionAddress);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission()==0;
+}
+
+static bool motionReadBytes(uint8_t reg,uint8_t* data,size_t length){
+  Wire.beginTransmission(motionAddress);
+  Wire.write(reg);
+  if(Wire.endTransmission(false)!=0)return false;
+  size_t received=Wire.requestFrom((int)motionAddress,(int)length);
+  if(received!=length)return false;
+  for(size_t i=0;i<length;i++)data[i]=Wire.read();
+  return true;
+}
+
+static bool motionProbe(uint8_t address,uint8_t& whoAmI){
+  motionAddress=address;
+  uint8_t value=0;
+  if(!motionReadBytes(0x75,&value,1))return false;
+  // Known WHO_AM_I values: MPU-6500 = 0x70, MPU-9250 = 0x71,
+  // MPU-9255 = 0x73. Accept these motion-sensor variants only.
+  if(value!=0x70 && value!=0x71 && value!=0x73)return false;
+  whoAmI=value;
+  return true;
+}
 
 void sensorsBegin(){
   pinMode(PIN_TCRT,INPUT); pinMode(PIN_IR,INPUT); pinMode(PIN_FLAME,INPUT_PULLDOWN); dht.begin();
 
-  // GY-521 MPU6050 shares the OLED I2C bus on GPIO21/GPIO22.
-  // Initialize the bus explicitly before probing the motion sensor.
+  // Motion sensor shares the OLED I2C bus on GPIO21/GPIO22.
   Wire.begin(PIN_OLED_SDA,PIN_OLED_SCL);
   Wire.setClock(100000);
-  delay(50); // allow the GY-521 to settle after power-up
+  delay(50);
 
-  // The GY-521 normally uses AD0=LOW -> 0x68. If AD0 is HIGH, it uses 0x69.
-  sensors.mpuPresent=mpu.begin(MPU6050_ADDRESS,&Wire);
+  uint8_t detectedWhoAmI=0;
+  sensors.mpuPresent=motionProbe(MOTION_I2C_ADDRESS,detectedWhoAmI);
+  if(!sensors.mpuPresent)sensors.mpuPresent=motionProbe(MOTION_I2C_ALT_ADDRESS,detectedWhoAmI);
+
   if(sensors.mpuPresent){
-    Serial.println("MPU6050/GY-521 detected at 0x68");
+    motionWhoAmI=detectedWhoAmI;
+    Serial.print("MPU-9250 family motion sensor detected at 0x");
+    Serial.print(motionAddress,HEX);
+    Serial.print(" (WHO_AM_I=0x");
+    Serial.print(motionWhoAmI,HEX);
+    Serial.println(")");
+
+    // Wake device and configure the accelerometer to +/-8 g and gyro to +/-500 dps.
+    motionWriteByte(0x6B,0x00); // PWR_MGMT_1: wake, internal clock
+    delay(10);
+    motionWriteByte(0x1A,0x03); // CONFIG: DLPF ~44 Hz gyro / ~41 Hz accel path
+    motionWriteByte(0x1C,0x10); // ACCEL_CONFIG: +/-8 g
+    motionWriteByte(0x1D,0x03); // ACCEL_CONFIG2: accelerometer DLPF
+    motionWriteByte(0x1B,0x08); // GYRO_CONFIG: +/-500 dps
   } else {
-    sensors.mpuPresent=mpu.begin(MPU6050_ALT_ADDRESS,&Wire);
-    if(sensors.mpuPresent) Serial.println("MPU6050/GY-521 detected at 0x69");
-    else Serial.println("ERROR: MPU6050/GY-521 not detected on I2C bus (0x68/0x69)");
-  }
-
-  if(sensors.mpuPresent){
-    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    Serial.println("ERROR: MPU-9250/MPU-6500/MPU-9255 not detected at 0x68 or 0x69");
   }
 }
 
@@ -42,10 +82,28 @@ void sensorsReadFast(){
   bool flameActive=FLAME_ACTIVE_LOW?(flameRaw==LOW):(flameRaw==HIGH);
   if(flameActive){if(flameHighSince==0)flameHighSince=millis(); sensors.flameDetected=(millis()-flameHighSince>=FLAME_CONFIRM_MS);} else {flameHighSince=0;sensors.flameDetected=false;}
 
-  if(sensors.mpuPresent){ sensors_event_t a,g,t; mpu.getEvent(&a,&g,&t); sensors.accelX=a.acceleration.x;sensors.accelY=a.acceleration.y;sensors.accelZ=a.acceleration.z;sensors.gyroX=g.gyro.x;sensors.gyroY=g.gyro.y;sensors.gyroZ=g.gyro.z;
-    sensors.accelMagnitude=sqrtf(sensors.accelX*sensors.accelX+sensors.accelY*sensors.accelY+sensors.accelZ*sensors.accelZ);
-    sensors.tiltDegrees=atan2f(sqrtf(sensors.accelX*sensors.accelX+sensors.accelY*sensors.accelY),fabsf(sensors.accelZ))*57.2958f;
-    sensors.motionDetected=fabsf(sensors.accelMagnitude-9.80665f)>MOTION_ACCEL_THRESHOLD_MS2; sensors.impactDetected=sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2; sensors.tiltDetected=sensors.tiltDegrees>TILT_THRESHOLD_DEG;
+  if(sensors.mpuPresent){
+    uint8_t raw[14];
+    if(motionReadBytes(0x3B,raw,sizeof(raw))){
+      int16_t ax=(int16_t)((raw[0]<<8)|raw[1]);
+      int16_t ay=(int16_t)((raw[2]<<8)|raw[3]);
+      int16_t az=(int16_t)((raw[4]<<8)|raw[5]);
+      int16_t gx=(int16_t)((raw[8]<<8)|raw[9]);
+      int16_t gy=(int16_t)((raw[10]<<8)|raw[11]);
+      int16_t gz=(int16_t)((raw[12]<<8)|raw[13]);
+
+      // +/-8 g = 4096 LSB/g. Convert to m/s^2 for the existing VIGIL API.
+      constexpr float ACCEL_SCALE=9.80665f/4096.0f;
+      // +/-500 degrees/s = 65.5 LSB/(degrees/s). Convert to rad/s.
+      constexpr float GYRO_SCALE=(3.14159265359f/180.0f)/65.5f;
+      sensors.accelX=ax*ACCEL_SCALE; sensors.accelY=ay*ACCEL_SCALE; sensors.accelZ=az*ACCEL_SCALE;
+      sensors.gyroX=gx*GYRO_SCALE; sensors.gyroY=gy*GYRO_SCALE; sensors.gyroZ=gz*GYRO_SCALE;
+      sensors.accelMagnitude=sqrtf(sensors.accelX*sensors.accelX+sensors.accelY*sensors.accelY+sensors.accelZ*sensors.accelZ);
+      sensors.tiltDegrees=atan2f(sqrtf(sensors.accelX*sensors.accelX+sensors.accelY*sensors.accelY),fabsf(sensors.accelZ))*57.2958f;
+      sensors.motionDetected=fabsf(sensors.accelMagnitude-9.80665f)>MOTION_ACCEL_THRESHOLD_MS2; sensors.impactDetected=sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2; sensors.tiltDetected=sensors.tiltDegrees>TILT_THRESHOLD_DEG;
+    } else {
+      sensors.motionDetected=false; sensors.impactDetected=false; sensors.tiltDetected=false;
+    }
   }
 }
 
