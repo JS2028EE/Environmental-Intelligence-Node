@@ -1,17 +1,21 @@
 // =============================================================================
-//  VIGIL-01  —  Portable Environmental Intelligence Node
-//  Firmware V1.2
+//  VIGIL-01 — Portable Environmental Intelligence Node
+//  Firmware V1.3
 // -----------------------------------------------------------------------------
-//  Refactor of V1.1. Same pins, same sensor polarities/thresholds, same
-//  button feel — reorganized into readable modules, with a data-driven menu
-//  system, settings that survive a reboot, a friendlier web dashboard, and
-//  a couple of real bugs fixed along the way. See README.md for the full
-//  changelog.
-//
-//  Required libraries (Arduino Library Manager):
-//    Adafruit GFX Library, Adafruit SSD1306, DHT sensor library, ArduinoJson
-//  Everything else (WiFi, WebServer, DNSServer, ESPmDNS, Preferences,
-//  esp_task_wdt) ships with the ESP32 board package — nothing else to install.
+//  V1.3 adds a navigation/motion sensing subsystem without changing the
+//  existing sensor pins, button pins, alarm behavior, or I2C display bus.
+//  MPU6050 + BME280 share I2C; a receive-only GPS feed uses GPIO5.
+// =============================================================================
+// Required libraries (Arduino Library Manager):
+//   Adafruit GFX Library
+//   Adafruit SSD1306
+//   DHT sensor library
+//   Adafruit MPU6050
+//   Adafruit Unified Sensor
+//   Adafruit BME280 Library
+//   TinyGPSPlus
+//   ArduinoJson 6.x
+// Everything else used here ships with the ESP32 board package.
 // =============================================================================
 
 #include <Arduino.h>
@@ -33,21 +37,9 @@ static unsigned long lastDisplayUpdate = 0;
 
 void setup() {
   Serial.begin(115200);
-
-  pinMode(PIN_GREEN_LED, OUTPUT);
-  pinMode(PIN_RED_LED, OUTPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_GREEN_LED, LOW);
-  digitalWrite(PIN_RED_LED, LOW);
-  noTone(PIN_BUZZER);
-
-  settingsLoad();
-  navigationBegin();
-  sensorsBegin();
-  displayBegin();
-  displayShowBoot();
-  webBegin();
-
+  pinMode(PIN_GREEN_LED, OUTPUT); pinMode(PIN_RED_LED, OUTPUT); pinMode(PIN_BUZZER, OUTPUT);
+  digitalWrite(PIN_GREEN_LED, LOW); digitalWrite(PIN_RED_LED, LOW); noTone(PIN_BUZZER);
+  settingsLoad(); navigationBegin(); sensorsBegin(); displayBegin(); displayShowBoot(); webBegin();
 #if WATCHDOG_ENABLED
   watchdogBegin();
 #endif
@@ -55,29 +47,11 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
-
-  webPoll();
-  navigationPoll();
-
-  if (now - lastSensorRead >= SENSOR_POLL_MS) {
-    lastSensorRead = now;
-    sensorsReadFast();
-    heartRateProcess();
-    systemStatus = evaluateSystemStatus();
-  }
-
-  if (now - lastDHTRead >= DHT_POLL_MS) {
-    lastDHTRead = now;
-    sensorsReadSlow();
-  }
-
-  if (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS) {
-    lastDisplayUpdate = now;
-    displayRender();
-  }
-
+  webPoll(); navigationPoll();
+  if (now-lastSensorRead >= SENSOR_POLL_MS) { lastSensorRead=now; sensorsReadFast(); heartRateProcess(); systemStatus=evaluateSystemStatus(); }
+  if (now-lastDHTRead >= DHT_POLL_MS) { lastDHTRead=now; sensorsReadSlow(); }
+  if (now-lastDisplayUpdate >= DISPLAY_REFRESH_MS) { lastDisplayUpdate=now; displayRender(); }
   updateStatusOutputs();
-
 #if WATCHDOG_ENABLED
   watchdogFeed();
 #endif
