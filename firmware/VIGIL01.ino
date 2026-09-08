@@ -1,10 +1,12 @@
 // =============================================================================
 //  VIGIL-01 — Portable Environmental Intelligence Node
-//  Firmware V1.4
+//  Firmware V1.5
 // -----------------------------------------------------------------------------
-//  V1.4 includes the MPU-9250/MPU-6500/MPU-9255 motion subsystem, telemetry
-//  state classification, and a staged fall detector while preserving the
-//  existing sensor pins, UI, and environmental alarm behavior.
+//  V1.5 preserves the V1.4 sensor architecture while adding persistent,
+//  web-tunable fall thresholds and a bounded in-RAM event history endpoint.
+//  The MPU-9250/MPU-6500/MPU-9255 motion subsystem remains accelerometer + gyro
+//  only; magnetometer support is intentionally not enabled until the exact
+//  silicon/module is positively validated.
 //  Motion/tilt/impact are telemetry only. The physical alarm is triggered by
 //  a validated fall sequence (low-g -> impact -> sustained post-impact tilt).
 // =============================================================================
@@ -26,6 +28,7 @@
 #include "DisplayUI.h"
 #include "Alerts.h"
 #include "WebDashboard.h"
+#include "EventLog.h"
 #if WATCHDOG_ENABLED
 #include "Watchdog.h"
 #endif
@@ -38,7 +41,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(PIN_GREEN_LED, OUTPUT); pinMode(PIN_RED_LED, OUTPUT); pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_GREEN_LED, LOW); digitalWrite(PIN_RED_LED, LOW); noTone(PIN_BUZZER);
-  settingsLoad(); navigationBegin(); sensorsBegin(); displayBegin(); displayShowBoot(); webBegin();
+  settingsLoad(); eventLogBegin(); navigationBegin(); sensorsBegin(); displayBegin(); displayShowBoot(); webBegin();
 #if WATCHDOG_ENABLED
   watchdogBegin();
 #endif
@@ -47,7 +50,7 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   webPoll(); navigationPoll();
-  if (now-lastSensorRead >= SENSOR_POLL_MS) { lastSensorRead=now; sensorsReadFast(); heartRateProcess(); systemStatus=evaluateSystemStatus(); }
+  if (now-lastSensorRead >= SENSOR_POLL_MS) { lastSensorRead=now; sensorsReadFast(); heartRateProcess(); systemStatus=evaluateSystemStatus(); eventLogPoll(); }
   if (now-lastDHTRead >= DHT_POLL_MS) { lastDHTRead=now; sensorsReadSlow(); }
   if (now-lastDisplayUpdate >= DISPLAY_REFRESH_MS) { lastDisplayUpdate=now; displayRender(); }
   updateStatusOutputs();
