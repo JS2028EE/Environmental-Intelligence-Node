@@ -14,6 +14,7 @@ static unsigned long flameHighSince=0,lastBeatTime=0; static int heartBaseline=2
 // is required.
 static uint8_t motionAddress=0;
 static uint8_t motionWhoAmI=0;
+static unsigned long motionLastRecoveryAttempt=0;
 
 // Fall detection state machine. Motion, impact, and tilt remain useful
 // telemetry, but only the validated multi-stage fall event can raise an alarm.
@@ -51,6 +52,30 @@ static bool motionProbe(uint8_t address,uint8_t& whoAmI){
   return true;
 }
 
+static bool motionConfigure(){
+  // Wake device and configure the accelerometer to +/-8 g and gyro to +/-500 dps.
+  if(!motionWriteByte(0x6B,0x00))return false; // PWR_MGMT_1: wake, internal clock
+  delay(10);
+  if(!motionWriteByte(0x1A,0x03))return false; // CONFIG: DLPF ~44 Hz gyro / ~41 Hz accel path
+  if(!motionWriteByte(0x1C,0x10))return false; // ACCEL_CONFIG: +/-8 g
+  if(!motionWriteByte(0x1D,0x03))return false; // ACCEL_CONFIG2: accelerometer DLPF
+  if(!motionWriteByte(0x1B,0x08))return false; // GYRO_CONFIG: +/-500 dps
+  return true;
+}
+
+static bool motionDetectAndConfigure(){
+  uint8_t detectedWhoAmI=0;
+  if(motionProbe(MOTION_I2C_ADDRESS,detectedWhoAmI) || motionProbe(MOTION_I2C_ALT_ADDRESS,detectedWhoAmI)){
+    motionWhoAmI=detectedWhoAmI;
+    if(motionConfigure()){
+      sensors.mpuPresent=true;
+      return true;
+    }
+  }
+  sensors.mpuPresent=false;
+  return false;
+}
+
 void sensorsBegin(){
   pinMode(PIN_TCRT,INPUT); pinMode(PIN_IR,INPUT); pinMode(PIN_FLAME,INPUT_PULLDOWN); dht.begin();
 
@@ -59,25 +84,12 @@ void sensorsBegin(){
   Wire.setClock(100000);
   delay(50);
 
-  uint8_t detectedWhoAmI=0;
-  sensors.mpuPresent=motionProbe(MOTION_I2C_ADDRESS,detectedWhoAmI);
-  if(!sensors.mpuPresent)sensors.mpuPresent=motionProbe(MOTION_I2C_ALT_ADDRESS,detectedWhoAmI);
-
-  if(sensors.mpuPresent){
-    motionWhoAmI=detectedWhoAmI;
+  if(motionDetectAndConfigure()){
     Serial.print("MPU-9250 family motion sensor detected at 0x");
     Serial.print(motionAddress,HEX);
     Serial.print(" (WHO_AM_I=0x");
     Serial.print(motionWhoAmI,HEX);
     Serial.println(")");
-
-    // Wake device and configure the accelerometer to +/-8 g and gyro to +/-500 dps.
-    motionWriteByte(0x6B,0x00); // PWR_MGMT_1: wake, internal clock
-    delay(10);
-    motionWriteByte(0x1A,0x03); // CONFIG: DLPF ~44 Hz gyro / ~41 Hz accel path
-    motionWriteByte(0x1C,0x10); // ACCEL_CONFIG: +/-8 g
-    motionWriteByte(0x1D,0x03); // ACCEL_CONFIG2: accelerometer DLPF
-    motionWriteByte(0x1B,0x08); // GYRO_CONFIG: +/-500 dps
   } else {
     Serial.println("ERROR: MPU-9250/MPU-6500/MPU-9255 not detected at 0x68 or 0x69");
   }
@@ -90,9 +102,21 @@ void sensorsReadFast(){
   bool flameActive=FLAME_ACTIVE_LOW?(flameRaw==LOW):(flameRaw==HIGH);
   if(flameActive){if(flameHighSince==0)flameHighSince=millis(); sensors.flameDetected=(millis()-flameHighSince>=FLAME_CONFIRM_MS);} else {flameHighSince=0;sensors.flameDetected=false;}
 
+  unsigned long now=millis();
+
+  // Keep mpuPresent tied to live communication, not only the boot-time probe.
+  // A disconnected breadboard wire is therefore visible as IMU unavailable.
+  if(!sensors.mpuPresent){
+    if(now-motionLastRecoveryAttempt>=1000){
+      motionLastRecoveryAttempt=now;
+      motionDetectAndConfigure();
+    }
+  }
+
   if(sensors.mpuPresent){
     uint8_t raw[14];
     if(motionReadBytes(0x3B,raw,sizeof(raw))){
+      sensors.mpuPresent=true;
       int16_t ax=(int16_t)((raw[0]<<8)|raw[1]);
       int16_t ay=(int16_t)((raw[2]<<8)|raw[3]);
       int16_t az=(int16_t)((raw[4]<<8)|raw[5]);
@@ -129,7 +153,6 @@ void sensorsReadFast(){
       // 3) require a sustained post-impact orientation change.
       // Normal walking/running can create motion and occasional acceleration
       // spikes, but should not satisfy this complete sequence.
-      unsigned long now=millis();
       if(sensors.accelMagnitude<FALL_FREEFALL_THRESHOLD_MS2){
         if(freeFallSince==0)freeFallSince=now;
       } else if(freeFallSince>0 && now-freeFallSince>FALL_SEQUENCE_TIMEOUT_MS){
@@ -164,7 +187,13 @@ void sensorsReadFast(){
 
       sensors.fallDetected=(fallAlertUntil>now);
     } else {
+      // The sensor was present but no longer communicates. Report the fault
+      // immediately instead of leaving the UI/dashboard stuck on "IMU OK".
+      sensors.mpuPresent=false;
       sensors.motionDetected=false; sensors.impactDetected=false; sensors.tiltDetected=false; sensors.fallDetected=false; sensors.motionState="UNKNOWN";
+      sensors.accelX=NAN; sensors.accelY=NAN; sensors.accelZ=NAN;
+      sensors.gyroX=NAN; sensors.gyroY=NAN; sensors.gyroZ=NAN;
+      sensors.accelMagnitude=NAN; sensors.tiltDegrees=NAN;
     }
   } else {
     sensors.fallDetected=false; sensors.motionState="UNKNOWN";
