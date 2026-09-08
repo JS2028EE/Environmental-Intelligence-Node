@@ -7,6 +7,7 @@ This directory contains the active modular VIGIL-01 firmware. V1.4 adds the corr
 ```text
 VIGIL01.ino       Main setup/loop coordinator
 Config.h          Pins, I2C addresses, thresholds, timing
+Secrets.h         Local-only AP credential file (ignored by Git)
 Types.h           Shared screen/status types
 Sensors.cpp/.h    Sensor acquisition, MPU-9250-family processing, fall detection
 MenuData.h        Menu tree
@@ -17,6 +18,10 @@ Settings.cpp/.h   Persistent NVS settings
 WebDashboard.cpp/.h Wi-Fi AP/dashboard/API/captive portal/mDNS
 Watchdog.cpp/.h   Watchdog recovery
 ```
+
+## Credentials
+
+The AP SSID remains `VIGIL-01`, but the deployment password is supplied by local `firmware/Secrets.h`. The real file is ignored by Git. Copy `firmware/Secrets.h.example` to `firmware/Secrets.h` and set the password before deployment. If the local file is absent, the firmware uses a compile-safe placeholder that must not be used for deployment.
 
 ## MPU-9250 / MPU-6500 / MPU-9255 motion subsystem
 
@@ -39,6 +44,10 @@ AD0 -> GND for 0x68
 ```
 
 The MPU is accessed directly through `Wire`; the obsolete Adafruit MPU6050 dependency is no longer used.
+
+## Live IMU fault handling
+
+`mpuPresent` is based on live communication, not only the boot-time probe. A failed motion register read clears `mpuPresent`, invalidates motion telemetry, and causes periodic rediscovery/reconfiguration attempts. This prevents a stale `IMU OK` state after a breadboard connection fails and permits recovery without rebooting when the connection is restored.
 
 ## Motion vs. alarm behavior
 
@@ -105,8 +114,6 @@ The HW511/TCRT5000 IR reflection sensor is **intentionally excluded from GLOBAL 
 
 A validated fall remains system-level and can activate the physical alarm regardless of the selected page.
 
-See `docs/OUTDOOR_IR_REFLECTION_FIX.md` for the incident and validation matrix.
-
 ## System status
 
 Critical status has priority over warning. Motion telemetry does not directly change system status.
@@ -124,19 +131,9 @@ Wire.setClock(100000)
 
 ## Dashboard
 
-The ESP32 provides:
+The ESP32 provides a local Wi-Fi dashboard at `vigil01.local` when the client is connected to the VIGIL-01 AP. `/data` exposes environmental values, heartbeat values, investigation sensors, motion telemetry, motion state, fall state, overall status, settings, and alert state. Browser refresh is 1000 ms.
 
-```text
-SSID: VIGIL-01
-Password: VIGIL01_2026
-mDNS: vigil01.local
-```
-
-`/data` exposes environmental values, heartbeat values, investigation sensors, motion telemetry, motion state, fall state, overall status, settings, and alert state. Browser refresh is 1000 ms.
-
-## Settings
-
-Persistent settings:
+The dashboard now exposes all existing persistent settings:
 
 ```text
 LEDS: ON/OFF
@@ -158,6 +155,10 @@ Required Arduino Library Manager libraries:
 
 The MPU-9250 family is accessed directly and **does not require Adafruit MPU6050 or Adafruit Unified Sensor**.
 
+## Automated build
+
+GitHub Actions compiles the `firmware/` sketch on pushes and pull requests using the ESP32 Arduino core and the required libraries.
+
 ## Other V1 scope
 
 BME280, GPS, SD storage, cloud telemetry, historical database, and battery monitoring are not active V1.4 subsystems. GPIO39 remains reserved for future battery monitoring.
@@ -166,11 +167,13 @@ BME280, GPS, SD storage, cloud telemetry, historical database, and battery monit
 
 1. Boot at 115200 baud.
 2. Confirm the Serial message identifies the MPU family and I²C address.
-3. Leave the unit still and confirm acceleration magnitude is near 9.8 m/s².
-4. Rotate it and verify tilt and gyro values change.
-5. Walk/run normally and confirm motion telemetry changes without an alarm.
-6. PAGE + IR REFLECTION + TCRT5000 detection -> alarm.
-7. PAGE + unrelated sensor condition -> no alarm.
-8. GLOBAL + IR reflection only -> no alarm.
-9. GLOBAL + defined system alarm -> alarm.
-10. Test controlled fall-like sequences only in a safe setup; confirm the staged detector rather than a raw impact is what produces a fall event.
+3. Disconnect the motion module during operation and confirm `mpuPresent` becomes false.
+4. Restore the connection and confirm the IMU can recover without rebooting.
+5. Leave the unit still and confirm acceleration magnitude is near 9.8 m/s².
+6. Rotate it and verify tilt and gyro values change.
+7. Walk/run normally and confirm motion telemetry changes without an alarm.
+8. PAGE + IR REFLECTION + TCRT5000 detection -> alarm.
+9. PAGE + unrelated sensor condition -> no alarm.
+10. GLOBAL + IR reflection only -> no alarm.
+11. GLOBAL + defined system alarm -> alarm.
+12. Test controlled fall-like sequences only in a safe setup; confirm the staged detector rather than a raw impact is what produces a fall event.
