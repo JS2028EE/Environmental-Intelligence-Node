@@ -124,9 +124,7 @@ void sensorsReadFast(){
       int16_t gy=(int16_t)((raw[10]<<8)|raw[11]);
       int16_t gz=(int16_t)((raw[12]<<8)|raw[13]);
 
-      // +/-8 g = 4096 LSB/g. Convert to m/s^2 for the existing VIGIL API.
       constexpr float ACCEL_SCALE=9.80665f/4096.0f;
-      // +/-500 degrees/s = 65.5 LSB/(degrees/s). Convert to rad/s.
       constexpr float GYRO_SCALE=(3.14159265359f/180.0f)/65.5f;
       sensors.accelX=ax*ACCEL_SCALE; sensors.accelY=ay*ACCEL_SCALE; sensors.accelZ=az*ACCEL_SCALE;
       sensors.gyroX=gx*GYRO_SCALE; sensors.gyroY=gy*GYRO_SCALE; sensors.gyroZ=gz*GYRO_SCALE;
@@ -136,12 +134,12 @@ void sensorsReadFast(){
       // These are telemetry classifiers only. They no longer directly affect
       // the physical alarm system.
       sensors.motionDetected=fabsf(sensors.accelMagnitude-9.80665f)>MOTION_ACCEL_THRESHOLD_MS2;
-      sensors.impactDetected=sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2;
-      sensors.tiltDetected=sensors.tiltDegrees>TILT_THRESHOLD_DEG;
+      sensors.impactDetected=sensors.accelMagnitude>settings.fallImpactThreshold;
+      sensors.tiltDetected=sensors.tiltDegrees>settings.fallTiltThreshold;
 
       float gyroMagnitude=sqrtf(sensors.gyroX*sensors.gyroX+sensors.gyroY*sensors.gyroY+sensors.gyroZ*sensors.gyroZ);
       if(sensors.accelMagnitude<0.5f || !isfinite(sensors.accelMagnitude)) sensors.motionState="UNKNOWN";
-      else if(sensors.accelMagnitude<FALL_FREEFALL_THRESHOLD_MS2) sensors.motionState="FREE-FALL";
+      else if(sensors.accelMagnitude<settings.fallFreefallThreshold) sensors.motionState="FREE-FALL";
       else if(gyroMagnitude>3.5f) sensors.motionState="ROTATING";
       else if(sensors.accelMagnitude>15.0f) sensors.motionState="FAST/IMPACT";
       else if(sensors.motionDetected) sensors.motionState="MOVING";
@@ -151,15 +149,13 @@ void sensorsReadFast(){
       // 1) detect a low-g/free-fall phase,
       // 2) require a significant impact shortly afterward,
       // 3) require a sustained post-impact orientation change.
-      // Normal walking/running can create motion and occasional acceleration
-      // spikes, but should not satisfy this complete sequence.
-      if(sensors.accelMagnitude<FALL_FREEFALL_THRESHOLD_MS2){
+      if(sensors.accelMagnitude<settings.fallFreefallThreshold){
         if(freeFallSince==0)freeFallSince=now;
       } else if(freeFallSince>0 && now-freeFallSince>FALL_SEQUENCE_TIMEOUT_MS){
         freeFallSince=0;
       }
 
-      if(freeFallSince>0 && sensors.accelMagnitude>IMPACT_ACCEL_THRESHOLD_MS2 && now-freeFallSince<=FALL_SEQUENCE_TIMEOUT_MS){
+      if(freeFallSince>0 && sensors.accelMagnitude>settings.fallImpactThreshold && now-freeFallSince<=FALL_SEQUENCE_TIMEOUT_MS){
         impactCandidateSince=now;
         postImpactSince=now;
         freeFallSince=0;
@@ -171,7 +167,7 @@ void sensorsReadFast(){
           impactCandidateSince=0;
           postImpactSince=0;
           fallTiltSince=0;
-        } else if(sensors.tiltDegrees>FALL_POST_IMPACT_TILT_DEG){
+        } else if(sensors.tiltDegrees>settings.fallTiltThreshold){
           if(fallTiltSince==0)fallTiltSince=now;
           if(now-fallTiltSince>=FALL_TILT_CONFIRM_MS){
             fallAlertUntil=now+FALL_ALERT_HOLD_MS;
@@ -187,8 +183,6 @@ void sensorsReadFast(){
 
       sensors.fallDetected=(fallAlertUntil>now);
     } else {
-      // The sensor was present but no longer communicates. Report the fault
-      // immediately instead of leaving the UI/dashboard stuck on "IMU OK".
       sensors.mpuPresent=false;
       sensors.motionDetected=false; sensors.impactDetected=false; sensors.tiltDetected=false; sensors.fallDetected=false; sensors.motionState="UNKNOWN";
       sensors.accelX=NAN; sensors.accelY=NAN; sensors.accelZ=NAN;
