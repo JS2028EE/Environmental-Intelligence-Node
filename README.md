@@ -2,7 +2,7 @@
 
 VIGIL-01 is a handheld, ESP32-based environmental and situational sensing instrument designed to provide live local information through a compact OLED interface and a local Wi-Fi dashboard.
 
-> **Project status:** V1.4 solderless-breadboard prototype / live-sensing development
+> **Project status:** V1.5 solderless-breadboard prototype / live-sensing development
 >
 > **Current power:** USB-powered prototype; battery feasibility demonstrated separately
 >
@@ -14,7 +14,7 @@ VIGIL-01 combines inexpensive sensors into one coherent engineering instrument f
 
 VIGIL-01 is an educational prototype. It is not a medical device, certified fire detector, calibrated laboratory instrument, or life-safety system.
 
-## Current firmware — V1.4
+## Current firmware — V1.5
 
 The modular firmware contains:
 
@@ -25,6 +25,7 @@ firmware/
 ├── Secrets.h.example
 ├── Types.h
 ├── Sensors.cpp / Sensors.h
+├── EventLog.cpp / EventLog.h
 ├── Navigation.cpp / Navigation.h
 ├── MenuData.h
 ├── DisplayUI.cpp / DisplayUI.h
@@ -34,7 +35,7 @@ firmware/
 └── Watchdog.cpp / Watchdog.h
 ```
 
-V1.4 includes the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, motion-state telemetry, staged fall detection, live IMU fault reporting, and a local dashboard settings interface.
+V1.5 preserves the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, motion-state telemetry, staged fall detection, live IMU fault reporting, and local dashboard settings while adding persistent web-tunable fall thresholds and a bounded in-RAM event history endpoint.
 
 ## Sensor architecture
 
@@ -78,9 +79,11 @@ Firmware reads `WHO_AM_I` and accepts:
 
 The firmware probes both `0x68` and `0x69` and reports the detected ID/address over Serial at 115200 baud. If a live motion read fails, `mpuPresent` is cleared and the firmware periodically attempts recovery, so the UI/dashboard cannot remain falsely stuck at `IMU OK` after a breadboard disconnect.
 
+The magnetometer is **not enabled in V1.5** because the exact board/silicon path has not yet been positively validated. The current motion subsystem therefore remains accelerometer + gyroscope only.
+
 ## Motion and fall behavior
 
-V1.4 separates **movement telemetry** from **physical alarms**.
+V1.5 separates **movement telemetry** from **physical alarms**.
 
 Walking, running, rotating, ordinary tilt, and an isolated acceleration spike do **not** trigger the buzzer/red alarm.
 
@@ -96,7 +99,7 @@ SUSTAINED POST-IMPACT TILT
 FALL EVENT / CRITICAL
 ```
 
-Prototype parameters:
+Default prototype parameters remain:
 
 ```text
 Free-fall:          < 4.0 m/s²
@@ -106,6 +109,8 @@ Sequence window:    1200 ms
 Tilt confirmation:  300 ms
 Alert hold:         3000 ms
 ```
+
+The three fall thresholds are now stored in NVS and can be adjusted through `/api/settings` and the dashboard. Timing parameters remain compile-time constants so the fall detector's sequence behavior is not accidentally altered during routine threshold tuning.
 
 The physical alert presentation uses a distinct rapid tone for a validated fall and the standard critical tone for other critical conditions such as flame/IR.
 
@@ -145,7 +150,7 @@ A validated fall remains system-level and can activate the physical alarm regard
 
 ## Orientation vs. position
 
-The IMU can report orientation and movement, but it cannot maintain reliable absolute 3D position indefinitely from acceleration/gyro integration alone because drift accumulates. V1.4 therefore reports how the device is moving and oriented rather than claiming a precise absolute position.
+The IMU can report orientation and movement, but it cannot maintain reliable absolute 3D position indefinitely from acceleration/gyro integration alone because drift accumulates. V1.5 therefore reports how the device is moving and oriented rather than claiming a precise absolute position.
 
 ## User interface
 
@@ -200,7 +205,7 @@ mDNS: vigil01.local
 
 `/data` exposes environmental, vital, investigation, motion, fall, system-status, settings, and alert-state telemetry. Browser polling is 1000 ms.
 
-The dashboard now exposes all existing persistent settings:
+Persistent settings exposed through the dashboard include:
 
 - LEDs ON/OFF
 - Buzzer ON/OFF
@@ -208,6 +213,11 @@ The dashboard now exposes all existing persistent settings:
 - Units C/F
 - Sound threshold
 - Water threshold
+- Fall free-fall threshold
+- Fall impact threshold
+- Fall post-impact tilt threshold
+
+The `/events` endpoint exposes the most recent 16 event transitions from a volatile in-RAM ring buffer. Events are intentionally not persisted to flash, SD, or cloud storage.
 
 ## Security and repository hygiene
 
@@ -254,11 +264,11 @@ Final validation
 
 ## Scope exclusions
 
-BME280, GPS, SD storage, cloud telemetry, and cloud storage are not active V1.4 subsystems. Battery monitoring circuitry is being developed separately and is not yet enabled in the tracked firmware.
+BME280, GPS, SD storage, cloud telemetry, and cloud storage are not active V1.5 subsystems. Battery monitoring circuitry is being developed separately and is not yet enabled in the tracked firmware. Magnetometer support is also deferred pending positive hardware validation.
 
 ## Engineering record
 
-The development record includes the MPU identification/debugging cycle, shared-I²C correction, motion false-alarm redesign, outdoor IR-reflection incident, live IMU fault handling, dashboard settings improvement, credential separation, and automated firmware build checking.
+The development record includes the MPU identification/debugging cycle, shared-I²C correction, motion false-alarm redesign, outdoor IR-reflection incident, live IMU fault handling, dashboard settings improvement, credential separation, persistent fall-threshold tuning, and bounded event logging. Historical update documents are retained rather than rewritten so the engineering process remains auditable.
 
 ## Roadmap
 
@@ -276,8 +286,11 @@ The development record includes the MPU identification/debugging cycle, shared-I
 - [x] Implement PAGE-only TCRT5000 alarm routing
 - [x] Separate deployment credentials from tracked source
 - [x] Add live IMU communication fault reporting
-- [x] Expose existing dashboard settings controls
+- [x] Expose dashboard settings controls
+- [x] Add persistent fall thresholds
+- [x] Add bounded in-RAM event history and `/events`
 - [x] Add automated firmware build workflow
+- [ ] Positively validate magnetometer hardware path
 - [ ] Characterize all sensor outputs
 - [ ] Validate fall detector with controlled tests
 - [ ] Validate PAGE/GLOBAL alarm matrix
