@@ -32,7 +32,7 @@ VIGIL-01 remains a solderless breadboard prototype. The breadboard is the valida
 | 34 | Sound sensor analog |
 | 35 | 49E Hall A0 |
 | 36 | Water sensor analog |
-| 39 | Reserved battery monitor |
+| 39 | Battery monitor divider input (reserved/firmware-disabled in V1.4) |
 
 ## 4. OLED + MPU-9250-family shared I²C bus
 
@@ -71,6 +71,10 @@ The module currently used is marked for the **MPU-9250 / MPU-6500 / MPU-9255 fam
 ```
 
 The actual identity is established by the boot diagnostic, not by the generic breakout-board label alone.
+
+### Live disconnect behavior
+
+Because the prototype is solderless, an I²C wire can be disturbed during testing. The firmware now clears `mpuPresent` when a live motion register read fails, invalidates motion telemetry, and periodically attempts to rediscover and reconfigure the sensor. This prevents a stale `IMU OK` state after a physical disconnect and allows recovery without a reboot when the connection is restored.
 
 ## 5. Motion capability
 
@@ -179,7 +183,7 @@ GND -> GND
 AO -> GPIO36
 ```
 
-The reading is relative wetness/water level. Continuous electrode power may accelerate corrosion.
+The reading is relative wetness/water level. Continuous electrode power may accelerate corrosion; pulsed power remains a planned hardware improvement.
 
 ### Flame/IR sensor
 
@@ -210,11 +214,29 @@ GPIO4 -> passive buzzer -> GND
 
 A transistor driver may be used in the final design if the selected buzzer requires more current than an ESP32 GPIO should provide.
 
-## 8. Common ground and voltage safety
+## 8. Battery-monitor divider
+
+GPIO39 is the reserved battery-monitor ADC input. When battery monitoring is enabled, the tracked firmware assumes a 2:1 divider:
+
+```text
+Battery +
+   │
+  100K
+   │
+   ├──── GPIO39
+   │
+  100K
+   │
+Battery - / GND
+```
+
+The divider midpoint is approximately half the battery voltage. For example, a 4.05 V cell produces about 2.03 V at GPIO39. The firmware then reconstructs the battery voltage and maps it to a rough percentage estimate. The current firmware keeps this feature disabled while the battery power architecture is finalized.
+
+## 9. Common ground and voltage safety
 
 All active modules share ESP32 ground. ESP32 GPIO/ADC inputs must never receive an unsafe voltage. Any higher-voltage module output must be checked or level-shifted before direct connection.
 
-## 9. Current exclusions
+## 10. Current exclusions
 
 Not active in V1.4:
 
@@ -223,11 +245,9 @@ Not active in V1.4:
 - SD card
 - cloud storage/database
 - historical telemetry
-- battery monitoring circuitry
+- battery monitoring in tracked firmware
 
-GPIO39 remains reserved for future battery monitoring.
-
-## 10. Planned hardware progression
+## 11. Planned hardware progression
 
 ```text
 Breadboard validation
