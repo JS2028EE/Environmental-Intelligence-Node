@@ -1,10 +1,10 @@
-# VIGIL-01 Hardware Architecture — V1.4
+# VIGIL-01 Hardware Architecture — V1.5
 
 ## 1. System objective
 
 VIGIL-01 is a portable ESP32-based environmental and situational sensing instrument. The current prototype combines environmental sensing, close-range investigation sensors, pulse sensing, a 6-axis motion sensor, a local OLED interface, LEDs, a buzzer, and a local Wi-Fi dashboard.
 
-V1 remains live-only: no SD storage, historical database, or cloud telemetry is active.
+V1.5 remains live-only: no SD storage, historical database, or cloud telemetry is active. Event history is limited to a 16-entry in-RAM ring buffer and is cleared on reboot.
 
 ## 2. Prototype stage
 
@@ -32,7 +32,7 @@ VIGIL-01 remains a solderless breadboard prototype. The breadboard is the valida
 | 34 | Sound sensor analog |
 | 35 | 49E Hall A0 |
 | 36 | Water sensor analog |
-| 39 | Battery monitor divider input (reserved/firmware-disabled in V1.4) |
+| 39 | Battery monitor divider input (reserved/firmware-disabled) |
 
 ## 4. OLED + MPU-9250-family shared I²C bus
 
@@ -106,13 +106,17 @@ Sustained post-impact tilt
 Fall event
 ```
 
-Current prototype parameters are `<4.0 m/s²` low-g, `>25.0 m/s²` impact, `>45°` post-impact tilt, a `1200 ms` sequence window, and `300 ms` tilt confirmation.
+Current prototype parameters are `<4.0 m/s²` low-g, `>25.0 m/s²` impact, `>45°` post-impact tilt, a `1200 ms` sequence window, and `300 ms` tilt confirmation. The three fall thresholds are persistent settings and can be adjusted through the local dashboard/API within firmware-defined sanity bounds.
+
+A validated fall uses a distinct high-frequency alarm tone from the standard critical alarm.
 
 This is experimental fall-detection logic and is not a certified safety system.
 
 ### Position/orientation clarification
 
-The IMU can describe orientation and movement, including tilt and angular rotation. It cannot provide reliable absolute 3D position over long periods by simply integrating acceleration because sensor bias and drift accumulate. V1.4 therefore reports **how the device is oriented and moving**, not a guaranteed geographic/spatial position.
+The IMU can describe orientation and movement, including tilt and angular rotation. It cannot provide reliable absolute 3D position over long periods by simply integrating acceleration because sensor bias and drift accumulate. V1.5 therefore reports **how the device is oriented and moving**, not a guaranteed geographic/spatial position.
+
+The installed module's magnetometer is intentionally not enabled in V1.5 because the exact magnetometer silicon and module routing have not yet been positively validated.
 
 ## 6. Other sensor wiring
 
@@ -156,6 +160,8 @@ V+ -> 3V3
 G -> GND
 S -> GPIO26
 ```
+
+The TCRT5000 signal is available as an investigation sensor and is intentionally excluded from GLOBAL alarm routing because outdoor ambient IR/light can cause nuisance detections. It is handled through its dedicated page/condition path.
 
 ### IR obstacle sensor
 
@@ -230,7 +236,7 @@ Battery +
 Battery - / GND
 ```
 
-The divider midpoint is approximately half the battery voltage. For example, a 4.05 V cell produces about 2.03 V at GPIO39. The firmware then reconstructs the battery voltage and maps it to a rough percentage estimate. The current firmware keeps this feature disabled while the battery power architecture is finalized.
+The divider midpoint is approximately half the battery voltage. For example, a 4.05 V cell produces about 2.03 V at GPIO39. The firmware then reconstructs the battery voltage and maps it to a rough percentage estimate. The current tracked firmware keeps this feature disabled while the battery power architecture is finalized.
 
 ## 9. Common ground and voltage safety
 
@@ -238,13 +244,14 @@ All active modules share ESP32 ground. ESP32 GPIO/ADC inputs must never receive 
 
 ## 10. Current exclusions
 
-Not active in V1.4:
+Not active in V1.5:
 
 - BME280
 - GPS
 - SD card
 - cloud storage/database
-- historical telemetry
+- persistent telemetry history
+- magnetometer support pending hardware validation
 - battery monitoring in tracked firmware
 
 ## 11. Planned hardware progression
