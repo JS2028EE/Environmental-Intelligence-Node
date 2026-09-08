@@ -10,7 +10,8 @@ The installed MPU module is handled as an **MPU-9250 / MPU-6500 / MPU-9255 famil
 
 ```text
 VIGIL01.ino       Main coordinator
-Config.h          GPIOs, I2C, thresholds, timing, fall parameters
+Config.h          GPIOs, I2C, thresholds, timing, fall parameters, AP configuration
+Secrets.h         Local-only AP credential file (ignored by Git)
 Types.h           Shared screen/status types
 Sensors.cpp/.h    Sensor acquisition + motion/fall processing
 Navigation.cpp/.h Button input/navigation
@@ -21,6 +22,12 @@ Settings.cpp/.h   Persistent NVS/flash settings
 WebDashboard.cpp/.h Local AP/dashboard/API/captive portal/mDNS
 Watchdog.cpp/.h   ESP32 watchdog
 ```
+
+## Credential handling
+
+The AP SSID remains `VIGIL-01`, but the password is no longer hardcoded in tracked source. A local `firmware/Secrets.h` supplies `AP_PASSWORD`; `firmware/Secrets.h.example` is the committed template and `.gitignore` excludes the real file.
+
+If `Secrets.h` is absent, the firmware uses a compile-safe placeholder that must be replaced before deployment. See `docs/SECURITY.md`.
 
 ## Motion subsystem
 
@@ -43,6 +50,12 @@ Supported `WHO_AM_I` values:
 ```
 
 The firmware probes `0x68` first and `0x69` second. Configuration is ±8 g acceleration, ±500 °/s gyro, and 100 kHz I²C.
+
+## Live IMU fault handling
+
+The boot-time probe establishes initial availability, but `mpuPresent` is also tied to live register reads. If a breadboard connection fails during operation, the failed read immediately clears `mpuPresent`, invalidates motion telemetry, and reports the motion subsystem as unavailable. The firmware then periodically reprobes and reconfigures the supported device so a restored connection can recover without rebooting.
+
+This prevents the OLED/dashboard from remaining falsely stuck at `IMU OK` after a physical disconnect.
 
 ## Motion telemetry
 
@@ -123,6 +136,10 @@ Only defined system-wide alarm conditions activate the physical alarm. The TCRT5
 
 A validated fall remains system-level and can activate the physical alarm regardless of the selected page.
 
+## Alert presentation
+
+Validated falls now use a distinct rapid 2500 Hz alert tone while other critical conditions retain the standard critical tone. This provides an audible distinction between a fall event and conditions such as flame/IR without changing the underlying alert severity.
+
 ## Shared I²C bus
 
 `Sensors.cpp` is the sole owner of I²C initialization:
@@ -134,54 +151,42 @@ Wire.setClock(100000)
 
 `DisplayUI.cpp` attaches the OLED to the existing `Wire` object without calling `Wire.begin()` again.
 
-## Main execution model
-
-```text
-setup()
-  -> Serial / GPIO
-  -> settings
-  -> navigation
-  -> sensors + I2C
-  -> display
-  -> web services
-  -> watchdog
-
-loop()
-  -> web + navigation
-  -> fast sensors / motion / heartbeat / status
-  -> slow DHT
-  -> OLED
-  -> status outputs
-  -> watchdog feed
-```
-
 ## Dashboard
 
 The local dashboard provides live telemetry through `/data`, including `mpuPresent`, acceleration, gyro, tilt, `motionState`, `motionDetected`, `impactDetected`, `tiltDetected`, and `fallDetected`. Browser polling is 1000 ms.
+
+The dashboard settings interface now exposes the existing persistent controls for LEDs, buzzer, PAGE/GLOBAL alerts, C/F units, sound threshold, and water threshold. The controls use the existing `/api/settings` GET/POST endpoints and NVS storage.
 
 ## Required libraries
 
 - Adafruit GFX Library
 - Adafruit SSD1306
-- DHT sensor library by Adafruit
+- DHT sensor library
 - ArduinoJson 6.x
 
 No MPU6050-specific library is required. `Wire`, WiFi, WebServer, DNSServer, ESPmDNS, Preferences, and watchdog functionality come from the ESP32 environment.
 
+## Automated build checking
+
+GitHub Actions now compiles the `firmware/` sketch on pushes and pull requests using the ESP32 Arduino core and the required libraries. This provides an automatic check for common source/build regressions.
+
 ## Current limitations
 
-- Motion/fall thresholds are prototype heuristics.
+- Motion/fall thresholds are prototype heuristics and remain compile-time constants until controlled characterization justifies making them runtime-tunable.
 - Absolute 3D position cannot be determined reliably from this 6-axis IMU alone because integrated acceleration and gyro data drift over time.
 - Heartbeat is experimental and not medical.
 - Analog sensors remain raw/relative until characterized/calibrated.
 - Flame/IR is not certified fire detection.
 - The TCRT5000 reflection signal is environmental-condition sensitive and is intentionally PAGE-only.
-- Battery monitoring remains disabled.
+- Battery monitoring remains disabled in tracked V1.4 firmware.
 - No historical telemetry or cloud storage is implemented.
+- The dashboard remains a local prototype service without production authentication or encryption.
 
 ## Validation checklist
 
 - Confirm boot identifies `WHO_AM_I` and address.
+- Confirm a live IMU disconnect changes `mpuPresent` from true to false.
+- Confirm a restored IMU connection can recover without rebooting.
 - Confirm stationary magnitude near 9.8 m/s².
 - Confirm rotation changes gyro/tilt.
 - Confirm normal walking/running changes telemetry without physical alarm.
@@ -191,3 +196,4 @@ No MPU6050-specific library is required. `Wire`, WiFi, WebServer, DNSServer, ESP
 - Confirm GLOBAL + IR reflection only does not activate the alarm.
 - Confirm GLOBAL defined alarm sources still activate the alarm.
 - Confirm the complete fall sequence produces a fall event under controlled testing.
+- Confirm fall and non-fall critical alert tones are distinguishable.
