@@ -2,8 +2,7 @@
 #include <Arduino.h>
 
 // User-configurable behavior. Loaded from flash (NVS) at boot and written
-// back immediately whenever something changes, so it survives power loss —
-// V1.1 reset all of this to defaults on every reboot.
+// back immediately whenever something changes, so it survives power loss.
 struct Settings {
   bool ledsEnabled     = true;
   bool buzzerEnabled   = true;
@@ -11,6 +10,9 @@ struct Settings {
   bool useFahrenheit   = false;
   int  soundThreshold;
   int  waterThreshold;
+  float fallFreefallThreshold;
+  float fallImpactThreshold;
+  float fallTiltThreshold;
 };
 
 extern Settings settings;
@@ -18,3 +20,4 @@ extern Settings settings;
 void settingsLoad();
 void settingsSaveFlag(const char* key, bool value);
 void settingsSaveInt(const char* key, int value);
+void settingsSaveFloat(const char* key, float value);
