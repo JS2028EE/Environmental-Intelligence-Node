@@ -1,15 +1,16 @@
-# VIGIL-01 — V1.4 Firmware
+# VIGIL-01 — V1.5 Firmware
 
-This directory contains the active modular VIGIL-01 firmware. V1.4 adds the corrected MPU-9250-family motion subsystem and changes motion handling so ordinary walking/running/rotation is telemetry only. Physical alarms are reserved for defined environmental events and a staged fall event.
+This directory contains the active modular VIGIL-01 firmware. V1.5 preserves the corrected MPU-9250-family motion subsystem and V1.4 alarm behavior while adding persistent web-tunable fall thresholds and a bounded in-RAM event history endpoint.
 
 ## Current architecture
 
 ```text
 VIGIL01.ino       Main setup/loop coordinator
-Config.h          Pins, I2C addresses, thresholds, timing
+Config.h          Pins, I2C addresses, defaults, timing
 Secrets.h         Local-only AP credential file (ignored by Git)
 Types.h           Shared screen/status types
 Sensors.cpp/.h    Sensor acquisition, MPU-9250-family processing, fall detection
+EventLog.cpp/.h   Volatile 16-entry event ring buffer
 MenuData.h        Menu tree
 Navigation.cpp/.h Buttons/navigation/debounce
 DisplayUI.cpp/.h OLED rendering
@@ -25,47 +26,19 @@ The AP SSID remains `VIGIL-01`, but the deployment password is supplied by local
 
 ## MPU-9250 / MPU-6500 / MPU-9255 motion subsystem
 
-The physical module is a board marked for the MPU-9250/MPU-6500/MPU-9255 family. The firmware reads `WHO_AM_I` and accepts:
+The physical module is a board marked for the MPU-9250/MPU-6500/MPU-9255 family. The firmware reads `WHO_AM_I` and accepts `0x70`, `0x71`, and `0x73`, probing `0x68` and `0x69` on the shared OLED I²C bus. The MPU is accessed directly through `Wire`; no MPU6050 library is used.
 
-```text
-0x70 -> MPU-6500
-0x71 -> MPU-9250
-0x73 -> MPU-9255
-```
-
-The device is probed at `0x68` and `0x69` and shares the OLED I²C bus:
-
-```text
-VCC -> ESP32 3V3
-GND -> ESP32 GND
-SDA -> GPIO21
-SCL -> GPIO22
-AD0 -> GND for 0x68
-```
-
-The MPU is accessed directly through `Wire`; the obsolete Adafruit MPU6050 dependency is no longer used.
+The accelerometer and gyro are active. Magnetometer support is intentionally not enabled until the exact module/silicon path is positively validated.
 
 ## Live IMU fault handling
 
-`mpuPresent` is based on live communication, not only the boot-time probe. A failed motion register read clears `mpuPresent`, invalidates motion telemetry, and causes periodic rediscovery/reconfiguration attempts. This prevents a stale `IMU OK` state after a breadboard connection fails and permits recovery without rebooting when the connection is restored.
+`mpuPresent` is based on live communication, not only the boot-time probe. A failed motion register read clears `mpuPresent`, invalidates motion telemetry, and causes periodic rediscovery/reconfiguration attempts. This prevents a stale `IMU OK` state after a breadboard connection fails and permits recovery without rebooting.
 
 ## Motion vs. alarm behavior
 
-Motion sensing has two jobs: describe how the device is moving and identify a possible fall. **Motion, impact, and tilt flags are telemetry and do not directly trigger the physical alarm.**
+Motion, impact, and tilt flags are telemetry and do not directly trigger the physical alarm.
 
-The dashboard also reports:
-
-```text
-STABLE
-MOVING
-ROTATING
-FAST/IMPACT
-FREE-FALL
-```
-
-### Fall detection
-
-A fall is treated as a sequence:
+A fall is treated as:
 
 ```text
 LOW-G / FREE-FALL
@@ -77,46 +50,13 @@ SUSTAINED POST-IMPACT TILT
 FALL EVENT
 ```
 
-Prototype parameters:
-
-- Free-fall threshold: `< 4.0 m/s²`
-- Impact threshold: `> 25.0 m/s²`
-- Post-impact tilt: `> 45°`
-- Maximum free-fall-to-impact window: `1200 ms`
-- Tilt confirmation: `300 ms`
-- Fall alert hold: `3000 ms`
+Default thresholds remain free-fall `< 4.0 m/s²`, impact `> 25.0 m/s²`, and post-impact tilt `> 45°`. These three thresholds are now loaded from NVS and can be changed through the dashboard or `/api/settings`. Fall sequence timing remains compile-time.
 
 ## PAGE vs GLOBAL alerts
 
-`ALERTS: PAGE` means the physical alarm responds only to the alarm condition associated with the currently selected page:
+PAGE mode responds only to the alarm condition associated with the selected page. GLOBAL mode uses defined system-wide alarm conditions. The HW511/TCRT5000 IR reflection sensor is intentionally excluded from GLOBAL mode because outdoor testing demonstrated nuisance detections. A validated fall remains system-level and can activate the physical alarm regardless of the selected page.
 
-```text
-SOUND page          -> sound threshold
-WATER page          -> water threshold
-OBJECT page         -> IR obstacle detection
-FLAME page          -> flame/IR event
-IR REFLECTION page  -> TCRT5000 reflection detection
-```
-
-An unrelated sensor condition must not activate the alarm on another page.
-
-`ALERTS: GLOBAL` means defined system-wide alarm conditions can activate the physical alarm:
-
-```text
-Water > configured threshold -> WARNING
-Object/IR detected           -> WARNING
-Sound > configured threshold -> WARNING
-Fall event                   -> CRITICAL
-Flame/IR event               -> CRITICAL
-```
-
-The HW511/TCRT5000 IR reflection sensor is **intentionally excluded from GLOBAL mode**. Outdoor testing demonstrated that strong environmental IR can make it report reflection detection and create nuisance alarms. It remains fully active as a sensing/telemetry subsystem and is actionable only from its dedicated `IR REFLECTION` page.
-
-A validated fall remains system-level and can activate the physical alarm regardless of the selected page.
-
-## System status
-
-Critical status has priority over warning. Motion telemetry does not directly change system status.
+Validated falls use a distinct rapid 2500 Hz buzzer pattern while other critical conditions retain the standard critical tone.
 
 ## I²C ownership
 
@@ -127,22 +67,21 @@ Wire.begin(GPIO21, GPIO22)
 Wire.setClock(100000)
 ```
 
-`DisplayUI.cpp` uses the configured `Wire` object without reinitializing the bus. This prevents the earlier duplicate-I²C-initialization problem.
+`DisplayUI.cpp` uses the configured `Wire` object without reinitializing the bus.
 
 ## Dashboard
 
-The ESP32 provides a local Wi-Fi dashboard at `vigil01.local` when the client is connected to the VIGIL-01 AP. `/data` exposes environmental values, heartbeat values, investigation sensors, motion telemetry, motion state, fall state, overall status, settings, and alert state. Browser refresh is 1000 ms.
+`/data` exposes live sensor, motion, status, settings, and alert telemetry. `/api/settings` provides persistent settings read/write access for LEDs, buzzer, PAGE/GLOBAL alerts, units, sound threshold, water threshold, and the three fall thresholds.
 
-The dashboard now exposes all existing persistent settings:
+## Event history
+
+V1.5 adds a 16-entry volatile event ring buffer. It records rising transitions for sound, water, object detection, IR reflection, flame, and validated fall events.
 
 ```text
-LEDS: ON/OFF
-BUZZER: ON/OFF
-ALERTS: PAGE/GLOBAL
-UNITS: C/F
-Sound threshold
-Water threshold
+GET /events
 ```
+
+The endpoint returns event uptime, type, and severity. Reboot clears the buffer. Events are not written to flash, SD, or cloud storage. See `docs/EVENT_LOGGING.md`.
 
 ## Libraries
 
@@ -153,27 +92,19 @@ Required Arduino Library Manager libraries:
 - DHT sensor library by Adafruit
 - ArduinoJson 6.x
 
-The MPU-9250 family is accessed directly and **does not require Adafruit MPU6050 or Adafruit Unified Sensor**.
-
 ## Automated build
 
-GitHub Actions compiles the `firmware/` sketch on pushes and pull requests using the ESP32 Arduino core and the required libraries.
-
-## Other V1 scope
-
-BME280, GPS, SD storage, cloud telemetry, historical database, and battery monitoring are not active V1.4 subsystems. GPIO39 remains reserved for future battery monitoring.
+GitHub Actions compiles the `firmware/` sketch on pushes and pull requests using the ESP32 Arduino core and the required libraries. ArduinoJson is pinned to 6.21.5 to match the firmware API. CI does not replace physical validation.
 
 ## Validation
 
-1. Boot at 115200 baud.
-2. Confirm the Serial message identifies the MPU family and I²C address.
-3. Disconnect the motion module during operation and confirm `mpuPresent` becomes false.
-4. Restore the connection and confirm the IMU can recover without rebooting.
-5. Leave the unit still and confirm acceleration magnitude is near 9.8 m/s².
-6. Rotate it and verify tilt and gyro values change.
-7. Walk/run normally and confirm motion telemetry changes without an alarm.
-8. PAGE + IR REFLECTION + TCRT5000 detection -> alarm.
-9. PAGE + unrelated sensor condition -> no alarm.
-10. GLOBAL + IR reflection only -> no alarm.
-11. GLOBAL + defined system alarm -> alarm.
-12. Test controlled fall-like sequences only in a safe setup; confirm the staged detector rather than a raw impact is what produces a fall event.
+1. Confirm the Serial message identifies the MPU family and I²C address.
+2. Disconnect the motion module during operation and confirm `mpuPresent` becomes false.
+3. Restore the connection and confirm the IMU can recover without rebooting.
+4. Walk/run normally and confirm motion telemetry changes without an alarm.
+5. Change fall thresholds from the dashboard and confirm persistence after reboot.
+6. Confirm PAGE/GLOBAL alarm behavior remains unchanged.
+7. Trigger defined events and confirm they appear once in `/events`.
+8. Generate more than 16 events and confirm the oldest records roll off.
+9. Reboot and confirm RAM event history clears.
+10. Test controlled fall-like sequences only in a safe setup.
