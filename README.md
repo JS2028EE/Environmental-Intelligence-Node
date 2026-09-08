@@ -22,6 +22,7 @@ The modular firmware contains:
 firmware/
 ├── VIGIL01.ino
 ├── Config.h
+├── Secrets.h.example
 ├── Types.h
 ├── Sensors.cpp / Sensors.h
 ├── Navigation.cpp / Navigation.h
@@ -33,7 +34,7 @@ firmware/
 └── Watchdog.cpp / Watchdog.h
 ```
 
-V1.4 includes the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, motion-state telemetry, and staged fall detection.
+V1.4 includes the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, motion-state telemetry, staged fall detection, live IMU fault reporting, and a local dashboard settings interface.
 
 ## Sensor architecture
 
@@ -41,7 +42,7 @@ V1.4 includes the corrected MPU-9250/MPU-6500/MPU-9255-family motion subsystem, 
 - DHT11 — temperature/humidity
 - Photoresistor — relative light
 - Sound sensor — relative acoustic signal
-- Flame/IR sensor — digital event detection
+- Flame/IR digital detection
 
 ### Vitals
 - HW502 — optical pulse signal / experimental heart-rate estimate
@@ -75,7 +76,7 @@ Firmware reads `WHO_AM_I` and accepts:
 0x73 -> MPU-9255
 ```
 
-The firmware probes both `0x68` and `0x69` and reports the detected ID/address over Serial at 115200 baud.
+The firmware probes both `0x68` and `0x69` and reports the detected ID/address over Serial at 115200 baud. If a live motion read fails, `mpuPresent` is cleared and the firmware periodically attempts recovery, so the UI/dashboard cannot remain falsely stuck at `IMU OK` after a breadboard disconnect.
 
 ## Motion and fall behavior
 
@@ -105,6 +106,8 @@ Sequence window:    1200 ms
 Tilt confirmation:  300 ms
 Alert hold:         3000 ms
 ```
+
+The physical alert presentation uses a distinct rapid tone for a validated fall and the standard critical tone for other critical conditions such as flame/IR.
 
 ## Alarm routing
 
@@ -139,8 +142,6 @@ Flame/IR event           -> CRITICAL
 The **TCRT5000 IR reflection sensor is intentionally excluded from GLOBAL mode**. Outdoor testing showed that sunlight/ambient infrared can make the reflection sensor report detection, producing nuisance alarms. It remains fully available on its investigation page.
 
 A validated fall remains system-level and can activate the physical alarm regardless of the selected page.
-
-See `docs/OUTDOOR_IR_REFLECTION_FIX.md` for the incident, root cause, correction, and validation matrix.
 
 ## Orientation vs. position
 
@@ -193,13 +194,13 @@ VIGIL-01 provides a local Wi-Fi AP:
 
 ```text
 SSID: VIGIL-01
-Password: VIGIL01_2026
+Password: provisioned locally in firmware/Secrets.h
 mDNS: vigil01.local
 ```
 
 `/data` exposes environmental, vital, investigation, motion, fall, system-status, settings, and alert-state telemetry. Browser polling is 1000 ms.
 
-## Persistent settings
+The dashboard now exposes all existing persistent settings:
 
 - LEDs ON/OFF
 - Buzzer ON/OFF
@@ -208,12 +209,15 @@ mDNS: vigil01.local
 - Sound threshold
 - Water threshold
 
-Defaults:
+## Security and repository hygiene
 
-```text
-Sound = 135
-Water = 2500
-```
+The AP password is intentionally not committed to the public repository. Copy `firmware/Secrets.h.example` to `firmware/Secrets.h` locally and set the deployment password. `firmware/Secrets.h` is ignored by Git. See `docs/SECURITY.md`.
+
+The repository also includes `.gitignore` for local secrets/build artifacts and an MIT `LICENSE`.
+
+## Battery monitoring
+
+GPIO39 and the battery-divider calculation are reserved in the firmware. The current repository keeps `BATTERY_MONITORING_ENABLED` disabled while the battery power architecture and characterization are still being finalized. When enabled, the existing 2:1 divider calculation reports a **rough percentage estimate**, not a calibrated state-of-charge measurement.
 
 ## Firmware libraries
 
@@ -250,11 +254,11 @@ Final validation
 
 ## Scope exclusions
 
-BME280, GPS, SD storage, cloud telemetry, historical databases, and battery monitoring are not active V1.4 subsystems. GPIO39 remains reserved for future battery monitoring.
+BME280, GPS, SD storage, cloud telemetry, and cloud storage are not active V1.4 subsystems. Battery monitoring circuitry is being developed separately and is not yet enabled in the tracked firmware.
 
 ## Engineering record
 
-The development record includes the MPU identification/debugging cycle, shared-I²C correction, motion false-alarm redesign, and the outdoor IR-reflection incident that led to PAGE-only TCRT5000 alarm routing.
+The development record includes the MPU identification/debugging cycle, shared-I²C correction, motion false-alarm redesign, outdoor IR-reflection incident, live IMU fault handling, dashboard settings improvement, credential separation, and automated firmware build checking.
 
 ## Roadmap
 
@@ -270,10 +274,14 @@ The development record includes the MPU identification/debugging cycle, shared-I
 - [x] Document breadboard and battery feasibility work
 - [x] Diagnose outdoor TCRT5000 reflection nuisance alarm
 - [x] Implement PAGE-only TCRT5000 alarm routing
+- [x] Separate deployment credentials from tracked source
+- [x] Add live IMU communication fault reporting
+- [x] Expose existing dashboard settings controls
+- [x] Add automated firmware build workflow
 - [ ] Characterize all sensor outputs
 - [ ] Validate fall detector with controlled tests
 - [ ] Validate PAGE/GLOBAL alarm matrix
-- [ ] Improve sensor fault detection
+- [ ] Improve sensor fault detection across all sensors
 - [ ] Finalize battery architecture
 - [ ] Design schematic
 - [ ] Design PCB
