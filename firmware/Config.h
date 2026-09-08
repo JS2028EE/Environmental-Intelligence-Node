@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "Secrets.h"
 
 // V1.4 pins preserved. MPU-9250/MPU-6500/MPU-9255 uses the existing I2C bus shared with the OLED.
 #define PIN_BUZZER      4
@@ -33,7 +34,6 @@
 #define MOTION_I2C_ALT_ADDRESS 0x69
 
 #define AP_SSID       "VIGIL-01"
-#define AP_PASSWORD   "VIGIL01_2026"
 #define MDNS_HOSTNAME "vigil01"
 
 constexpr bool TCRT_ACTIVE_LOW  = true;
