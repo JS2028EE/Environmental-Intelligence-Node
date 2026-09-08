@@ -28,7 +28,7 @@ jobs:
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "DHT sensor library"
-          arduino-cli lib install "ArduinoJson"
+          arduino-cli lib install "ArduinoJson@6.21.5"
 
       - name: Compile VIGIL-01 firmware
         run: arduino-cli compile --fqbn esp32:esp32:esp32 firmware
