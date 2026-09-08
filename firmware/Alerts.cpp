@@ -10,7 +10,7 @@ static bool pageHasActiveAlert() {
   switch (currentScreen) {
     case SOUND_SCREEN:      return sensors.soundRaw > settings.soundThreshold;
     case WATER_SCREEN:      return sensors.waterRaw > settings.waterThreshold;
-    case OBJECT_SCREEN:     return sensors.irDetected;
+    case OBJECT_SCREEN:    return sensors.irDetected;
     case IR_REFLECTION_SCREEN: return sensors.tcrtDetected;
     case FLAME_SCREEN:      return sensors.flameDetected;
     case CONDITIONS_SCREEN:
@@ -55,14 +55,21 @@ void updateStatusOutputs() {
   }
 
   digitalWrite(PIN_GREEN_LED, LOW);
-  bool critical = (systemStatus == STATUS_CRITICAL);
-  unsigned long flashPeriod = critical ? 100 : 150;
+  bool fall = sensors.fallDetected;
+  bool critical = fall || (systemStatus == STATUS_CRITICAL);
+  unsigned long flashPeriod = critical ? (fall ? 120 : 100) : 150;
 
   if (now - lastFlash > flashPeriod) {
     lastFlash = now;
     flashState = !flashState;
     if (flashState && settings.buzzerEnabled) {
-      tone(PIN_BUZZER, critical ? 2200 : 1800, critical ? 90 : 80);
+      // A fall uses a distinct rapid three-beat-style pattern so it can be
+      // distinguished from the continuous critical alert used for flame/IR.
+      if (fall) {
+        tone(PIN_BUZZER, 2500, 70);
+      } else {
+        tone(PIN_BUZZER, critical ? 2200 : 1800, critical ? 90 : 80);
+      }
     }
   }
   digitalWrite(PIN_RED_LED, flashState);
