@@ -1,6 +1,13 @@
 #pragma once
 #include <Arduino.h>
+
+// Local credentials are kept outside the repository. Copy Secrets.h.example
+// to Secrets.h and set the device password before deployment.
+#if __has_include("Secrets.h")
 #include "Secrets.h"
+#else
+#define AP_PASSWORD "CHANGE_ME_BEFORE_DEPLOYMENT"
+#endif
 
 // V1.4 pins preserved. MPU-9250/MPU-6500/MPU-9255 uses the existing I2C bus shared with the OLED.
 #define PIN_BUZZER      4
