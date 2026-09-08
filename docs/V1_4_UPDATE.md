@@ -124,7 +124,29 @@ The routing is now:
 
 The TCRT5000 sensor remains fully present in sensing and telemetry; it was not removed.
 
-### Engineering rationale
+## Engineering hardening added after the initial V1.4 implementation
+
+### Live IMU fault handling
+
+The motion sensor is no longer considered permanently healthy just because the boot-time `WHO_AM_I` probe succeeded. A failed live register read now clears `mpuPresent`, invalidates motion telemetry, and causes periodic rediscovery/reconfiguration attempts. This is especially important on a solderless breadboard where an I²C connection can be disturbed during testing.
+
+### Dashboard settings
+
+The dashboard now exposes the persistent settings that were already supported by `/api/settings` but were not rendered in the HTML: LEDs, buzzer, PAGE/GLOBAL alerts, and C/F units. Sound and water thresholds remain editable as before.
+
+### Distinct fall alert
+
+Validated falls now use a distinct rapid 2500 Hz tone rather than sharing the standard critical tone used for flame/IR. The severity remains CRITICAL; only the presentation differs.
+
+### Credential separation
+
+The AP password was removed from tracked source and documentation. The password is now supplied through local `firmware/Secrets.h`, which is ignored by Git, with `firmware/Secrets.h.example` provided as a template. See `docs/SECURITY.md`.
+
+### Automated build checking
+
+A GitHub Actions workflow now compiles the ESP32 firmware on pushes and pull requests using the ESP32 Arduino core and required libraries.
+
+## Engineering rationale
 
 The change explicitly separates **sensor detection** from **alarm policy**:
 
@@ -143,7 +165,7 @@ The TCRT5000 is deliberately PAGE-only because outdoor testing demonstrated that
 
 ## Dashboard improvement
 
-Dashboard polling was reduced from 700 ms to 1000 ms. The dashboard reports motion sensor presence, motion state, acceleration, gyro, tilt, motion/impact/tilt telemetry, and fall-event state.
+Dashboard polling was reduced from 700 ms to 1000 ms, and the dashboard now displays motion-sensor presence, motion state, acceleration, gyro, tilt, motion/impact/tilt telemetry, fall-event state, and the existing persistent settings.
 
 ## Important engineering limitation
 
@@ -158,6 +180,8 @@ Active documentation must remain aligned with this V1.4 alert routing change. Th
 ### Motion
 
 - Confirm boot `WHO_AM_I` identity and I²C address.
+- Confirm a live IMU disconnect changes `mpuPresent` from true to false.
+- Confirm a restored IMU connection can recover without rebooting.
 - Confirm stationary acceleration magnitude near 9.8 m/s².
 - Confirm rotation changes gyro and tilt.
 - Walk and run normally; verify no physical alarm.
@@ -175,5 +199,6 @@ Active documentation must remain aligned with this V1.4 alert routing change. Th
 - GLOBAL + sound/water/object/flame/fall: defined global condition -> alarm.
 - GLOBAL + IR reflection only: TCRT5000 detection -> **no physical alarm**.
 - Outdoor sunlight: record LDR, TCRT5000, IR obstacle, and alarm state.
+- Confirm fall and non-fall critical alert tones are distinguishable.
 
 V1.4 fall detection and sensor alarms are experimental and are not a certified life-safety system.
