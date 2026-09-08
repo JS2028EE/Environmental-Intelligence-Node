@@ -188,3 +188,33 @@ The following active project references were brought into alignment with V1.4:
 - new `docs/V1_4_UPDATE.md`
 
 The historical V1.1 document remains historical and is not rewritten to claim later features existed in V1.1.
+
+## 2026-09-07 — V1.4 Engineering Hardening
+
+A review of the active firmware and documentation identified several low-risk improvements that strengthen the prototype without changing its core sensor architecture.
+
+### Credential separation
+
+The Wi-Fi AP password was removed from tracked source. `firmware/Secrets.h` is now a local-only file ignored by Git, while `firmware/Secrets.h.example` provides the setup template. A compile-safe placeholder is used when the local file has not yet been created. This prevents a deployment credential from being published in the public repository.
+
+### Live IMU fault detection
+
+Previously, `mpuPresent` reflected only the boot-time `WHO_AM_I` probe. It now follows live register-read success. A failed read clears the status and invalidates motion telemetry; periodic rediscovery allows recovery after a breadboard connection is restored.
+
+### Dashboard settings controls
+
+The backend already supported persistent LEDs, buzzer, alert-mode, and unit settings, but the HTML exposed only numeric thresholds. The dashboard now renders controls for all existing settings and saves them through the same `/api/settings` interface.
+
+### Distinct fall alert presentation
+
+A validated fall now uses a distinct rapid 2500 Hz tone while other critical conditions retain the standard critical tone. Severity and alarm routing are unchanged.
+
+### Automated build checking
+
+A GitHub Actions workflow now compiles the ESP32 firmware on pushes and pull requests using the ESP32 Arduino core and required libraries. This adds an automated regression check for common source/build failures.
+
+### Scope intentionally left unchanged
+
+The review also identified runtime-tunable fall thresholds, a possible MPU-9250-family magnetometer, in-memory event history, documentation consolidation, and pulsed water-sensor power as useful future work. These were not implemented in this hardening pass because they either require new validation data, add a new subsystem, or represent V2-level architecture work.
+
+Battery monitoring also remains disabled in tracked firmware. The existing divider/percentage calculation is preserved as prototype functionality while the battery power architecture and state-of-charge characterization are finalized.
