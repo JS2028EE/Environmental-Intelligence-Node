@@ -43,18 +43,17 @@ void updateStatusOutputs() {
   if (!settings.ledsEnabled) {
     digitalWrite(PIN_GREEN_LED, LOW);
     digitalWrite(PIN_RED_LED, LOW);
-    noTone(PIN_BUZZER);
-    return;
   }
 
   if (!alertActiveHere()) {
-    digitalWrite(PIN_GREEN_LED, HIGH);
+    digitalWrite(PIN_GREEN_LED, settings.ledsEnabled ? HIGH : LOW);
     digitalWrite(PIN_RED_LED, LOW);
     noTone(PIN_BUZZER);
     return;
   }
 
   digitalWrite(PIN_GREEN_LED, LOW);
+  if (!settings.buzzerEnabled) noTone(PIN_BUZZER);
   bool fall = sensors.fallDetected;
   bool critical = fall || (systemStatus == STATUS_CRITICAL);
   unsigned long flashPeriod = critical ? (fall ? 120 : 100) : 150;
@@ -72,5 +71,5 @@ void updateStatusOutputs() {
       }
     }
   }
-  digitalWrite(PIN_RED_LED, flashState);
+  digitalWrite(PIN_RED_LED, settings.ledsEnabled && flashState ? HIGH : LOW);
 }

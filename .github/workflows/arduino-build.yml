@@ -31,4 +31,7 @@ jobs:
           arduino-cli lib install "ArduinoJson@6.21.5"
 
       - name: Compile VIGIL-01 firmware
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 firmware
+        run: |
+          mkdir -p "$RUNNER_TEMP/VIGIL01"
+          cp firmware/* "$RUNNER_TEMP/VIGIL01/"
+          arduino-cli compile --fqbn esp32:esp32:esp32 "$RUNNER_TEMP/VIGIL01"

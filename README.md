@@ -305,3 +305,7 @@ The development record includes the MPU identification/debugging cycle, shared-I
 ## Project philosophy
 
 VIGIL-01 is an engineering project, not just a collection of modules. Design decisions should be justified, raw sensors should be characterized, failures should be documented, and revisions should be based on measured results.
+
+## Maintenance review — October 2026
+
+LED enable and buzzer enable are now independent: disabling the LEDs no longer mutes an enabled buzzer. Check all four LED/buzzer switch combinations with a controlled alert on the bench. The CI workflow compiles a temporary `VIGIL01/` sketch folder containing the existing source files, matching Arduino's primary-sketch naming requirement. Existing hardware characterization and validation checklist items remain open.
